@@ -6,6 +6,7 @@
 
 with Ada.Finalization;
 with Interfaces.C;
+with Interfaces.C.Strings;
 with Libfyaml.Nodes;
 with Libfyaml.Thin;
 
@@ -76,7 +77,13 @@ package Libfyaml.Documents is
 private
 
    type Document is new Ada.Finalization.Limited_Controlled with record
-      Handle : Thin.Fy_Document := Thin.Null_Fy_Document;
+      Handle       : Thin.Fy_Document := Thin.Null_Fy_Document;
+      Owned_Buffer : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.Null_Ptr;
+      --  Only set by Parse_String: fy_document_build_from_string does not
+      --  copy its input (libfyaml is zero-copy in its core parsing
+      --  paths), so the source buffer must outlive the document. Freed
+      --  in Finalize.
    end record;
 
    overriding procedure Finalize (Doc : in out Document);

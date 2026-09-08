@@ -1,5 +1,4 @@
 with Ada.Strings.Unbounded;
-with Interfaces.C.Strings;
 with System;
 
 package body Libfyaml.Documents is
@@ -58,7 +57,8 @@ package body Libfyaml.Documents is
             end;
          end if;
          Thin.fy_diag_destroy (Diag);
-         return Document'(Ada.Finalization.Limited_Controlled with Handle => Handle);
+         return Document'(Ada.Finalization.Limited_Controlled
+                           with Handle => Handle, Owned_Buffer => <>);
       end;
    end Parse_Common;
 
@@ -70,8 +70,12 @@ package body Libfyaml.Documents is
       is (Thin.fy_document_build_from_string (Cfg, C_Text, C.size_t (Text'Length)));
 
    begin
-      return Result : constant Document := Parse_Common (Build'Access) do
-         CS.Free (C_Text);
+      --  C_Text is NOT freed here: fy_document_build_from_string doesn't
+      --  copy the input, so the resulting document's scalars can point
+      --  directly into this buffer. Ownership transfers to the Document
+      --  (see Owned_Buffer in the spec) and it's freed in Finalize.
+      return Result : Document := Parse_Common (Build'Access) do
+         Result.Owned_Buffer := C_Text;
       end return;
    exception
       when others =>
@@ -165,6 +169,9 @@ package body Libfyaml.Documents is
       if Doc.Handle /= Thin.Null_Fy_Document then
          Thin.fy_document_destroy (Doc.Handle);
          Doc.Handle := Thin.Null_Fy_Document;
+      end if;
+      if Doc.Owned_Buffer /= CS.Null_Ptr then
+         CS.Free (Doc.Owned_Buffer);
       end if;
    end Finalize;
 
