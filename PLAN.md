@@ -312,6 +312,38 @@ indication of it.
    The `False` default is a placeholder, not a settled decision — see
    open questions.
 
+## Multi-document YAML streams
+
+**Current gap, precisely:** `Libfyaml.Documents.Parse_String`/
+`Parse_File` wrap `fy_document_build_from_string`/`_file`, which build
+and return exactly *one* `fy_document`. Given a file containing more
+than one `---`-separated YAML document, only the first is parsed;
+later documents are silently dropped — no error, no exception, no
+truncation warning. Found by hand while exercising `besm2_fmt` on a
+two-document composite test file: the second entity just never
+appeared in the output, with a clean exit status.
+
+**Confirmed this is `alibfyaml`'s gap, not libfyaml's:** running
+libfyaml's own `fy-tool` (its bundled dump/re-emit CLI) against the
+identical multi-document file correctly parses and re-emits *both*
+documents, each with its own `---`. `fy-tool` reaches a different,
+lower-level libfyaml API for this — repeated `fy_parse_load_document`
+calls against an `fy_parser` advance through a stream one document at
+a time, returning `NULL` once exhausted — which `alibfyaml` doesn't
+bind at all; only the single-document convenience functions are
+bound (see `src/libfyaml-thin.ads`).
+
+**Fix direction (not designed in detail yet):** bind `fy_parser_create`/
+`fy_parser_destroy`/`fy_parse_load_document`/`fy_parser_set_input_*`
+(or whichever subset the single-document path doesn't already need) in
+`Libfyaml.Thin`, and add something like a `Libfyaml.Documents.
+Document_Stream` type (or an iterator/callback over `Parse_String`/
+`Parse_File`) that yields each `Document` in turn, distinct from the
+current "parse exactly one document" `Parse_String`/`Parse_File` — those
+should probably keep their current single-document behavior/signature
+for callers who know their input is a single document, rather than
+changing what they mean.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or
@@ -334,6 +366,9 @@ additions to the existing `test/config.yaml`) covering:
   produces the merged/dereferenced content
 - a new `test_scalars.adb` mirroring the existing `test_quickstart.adb`/
   `test_sequence.adb` pattern, added to `test/test.gpr`'s `Main` list
+- a two-document `---`-separated YAML fixture, once multi-document
+  stream support (see that section above) lands: confirm both
+  documents are actually reachable, not just the first
 
 ## Open questions
 
@@ -365,6 +400,15 @@ additions to the existing `test/config.yaml`) covering:
   `Libfyaml.Resolve_Error` leaves the `Document` in a still-usable
   (just-unresolved) state or whether failure should be treated as fatal
   to that `Document`, matching how `Parse_Error` behaves today.
+- **Multi-document stream API shape**: the Multi-document YAML streams
+  section above names a fix direction but not a settled design — an
+  iterator type, a callback-based `Parse_All`, or something closer to
+  `fy_parse_load_document`'s own "call again for the next one, `NULL`
+  means done" shape are all plausible; needs a real design pass rather
+  than picking one here. Also unresolved: should `Parse_String`/
+  `Parse_File` at least start raising or logging when given input with
+  more than one document, given today's silent truncation, even before
+  a real multi-document API exists?
 
 ## Non-breaking
 
