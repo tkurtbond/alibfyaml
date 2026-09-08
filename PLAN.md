@@ -77,9 +77,11 @@ Proposed v1 scope:
   the format itself defines. Open question below in case a consumer
   needs them.
 - **Integer**: decimal, with `0x`/`0o` accepted per core schema.
-  Provide both `Integer` (32-bit-plus) and `Long_Long_Integer` (64-bit)
-  accessors, since point/level values in something like BESM data are
-  small but a general binding shouldn't cap at 32 bits.
+  Provide `Integer`, `Long_Integer`, and `Long_Long_Integer` accessors
+  — all three, not just `Integer`/`Long_Long_Integer`, since a general
+  binding shouldn't force every caller needing more than 32 (or fewer
+  than 64) bits to convert by hand, and `Long_Integer` is the type
+  GNAT/most platforms actually use for "the wider native int."
 - **Float**: decimal + exponent form. `.inf`/`-.inf`/`.nan` deferred to
   an open question (rare in practice; easy to add later without an API
   break).
@@ -120,6 +122,7 @@ right one — e.g. via `Value`/`By_Path`):
 
 ```ada
 function Integer_Value        (N : Node) return Integer;
+function Long_Integer_Value   (N : Node) return Long_Integer;
 function Long_Long_Integer_Value (N : Node) return Long_Long_Integer;
 function Float_Value          (N : Node) return Float;
 function Long_Float_Value     (N : Node) return Long_Float;
@@ -141,6 +144,7 @@ were going to hand-roll):
 ```ada
 --  Required: raises Missing_Key if absent, Data_Error if malformed.
 function Integer_Value (Map : Node; Key : String) return Integer;
+function Long_Integer_Value (Map : Node; Key : String) return Long_Integer;
 function Long_Long_Integer_Value (Map : Node; Key : String) return Long_Long_Integer;
 function Float_Value   (Map : Node; Key : String) return Float;
 function Long_Float_Value (Map : Node; Key : String) return Long_Float;
@@ -152,6 +156,8 @@ function String_Value  (Map : Node; Key : String) return String;  -- Missing_Key
 --  malformed-ness are different failure modes and should stay
 --  distinguishable).
 function Integer_Value (Map : Node; Key : String; Default : Integer) return Integer;
+function Long_Integer_Value
+  (Map : Node; Key : String; Default : Long_Integer) return Long_Integer;
 function Long_Long_Integer_Value
   (Map : Node; Key : String; Default : Long_Long_Integer) return Long_Long_Integer;
 function Float_Value   (Map : Node; Key : String; Default : Float) return Float;
@@ -310,7 +316,10 @@ additions to the existing `test/config.yaml`) covering:
 - a present-but-malformed value for each type (expect `Data_Error`)
 - an absent key in required form (expect `Missing_Key`) and optional
   form (expect `Default` returned)
-- hex/octal integer forms, boolean case variants
+- hex/octal integer forms, boolean case variants, and a value in each
+  of `Integer`/`Long_Integer`/`Long_Long_Integer`'s range but not the
+  narrower type(s), to confirm the right accessor is actually required
+  for it
 - timestamps: date-only, `T`- and space-separated, fractional seconds,
   `Z`, `+HH:MM`/`-HH:MM` offsets, and a malformed case (expect
   `Data_Error`)
