@@ -1,0 +1,23 @@
+library project Libfyaml_Ada is
+
+   for Languages use ("Ada");
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+   for Library_Dir use "lib";
+   for Library_Name use "fyaml_ada";
+   for Library_Kind use "static";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2012", "-gnatwa", "-gnatVa", "-g");
+   end Compiler;
+
+   --  This is a pure Ada import layer (Interfaces.C pragma Import bindings):
+   --  no C headers are compiled, so only the linker needs to find
+   --  libfyaml.so, e.g. via `pkg-config --libs libfyaml` passed through
+   --  -largs, or LIBRARY_PATH / a system library directory.
+   package Linker is
+      for Linker_Options use ("-lfyaml");
+   end Linker;
+
+end Libfyaml_Ada;

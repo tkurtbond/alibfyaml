@@ -1,0 +1,5 @@
+obj/
+lib/
+test/obj/
+test/test_quickstart
+test/test_sequence
