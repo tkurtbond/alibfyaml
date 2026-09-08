@@ -220,7 +220,22 @@ package body Libfyaml.Nodes is
          raise Libfyaml.Data_Error with "not a valid float: """ & Text & '"';
       end if;
       begin
-         return Float'Value (Text);
+         declare
+            Result : constant Float := Float'Value (Text);
+         begin
+            --  Float'Value does not raise Constraint_Error for a literal
+            --  that overflows Float's finite range -- on this platform it
+            --  silently produces an IEEE infinity instead, which 'Valid
+            --  (unlike a bare range comparison) reliably detects. Checked
+            --  here, before the result is returned anywhere, rather than
+            --  relying on Constraint_Error being raised at some later,
+            --  compiler/switch-dependent point.
+            if not Result'Valid then
+               raise Libfyaml.Data_Error with
+                 "float out of range: """ & Text & '"';
+            end if;
+            return Result;
+         end;
       exception
          when Constraint_Error =>
             raise Libfyaml.Data_Error with "float out of range: """ & Text & '"';
@@ -234,7 +249,15 @@ package body Libfyaml.Nodes is
          raise Libfyaml.Data_Error with "not a valid float: """ & Text & '"';
       end if;
       begin
-         return Long_Float'Value (Text);
+         declare
+            Result : constant Long_Float := Long_Float'Value (Text);
+         begin
+            if not Result'Valid then
+               raise Libfyaml.Data_Error with
+                 "float out of range: """ & Text & '"';
+            end if;
+            return Result;
+         end;
       exception
          when Constraint_Error =>
             raise Libfyaml.Data_Error with "float out of range: """ & Text & '"';
