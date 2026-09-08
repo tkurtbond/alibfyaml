@@ -1,0 +1,33 @@
+# Test data for test_navigate.adb, a worked example of walking a
+# nested document tree and reading out typed values. Deliberately
+# covers every YAML core-schema scalar type (null, bool, int, float,
+# string) plus both collection kinds (sequence, mapping), nested to a
+# couple of levels so both generic tree-walking and direct/targeted
+# field access have something realistic to demonstrate on.
+
+name: Sample Config
+version: 3
+pi: 3.14159
+enabled: true
+disabled: false
+homepage: ~
+description: null
+
+tags:
+  - alpha
+  - beta
+  - gamma
+
+server:
+  host: localhost
+  port: 8080
+  timeout: 30.5
+  ssl: true
+
+endpoints:
+  - name: health
+    path: /health
+    public: true
+  - name: admin
+    path: /admin
+    public: false
