@@ -1,0 +1,59 @@
+* TODO Add source-location access to alibfyaml
+  libfyaml tracks source positions throughout parsing, but alibfyaml
+  doesn't expose any of it yet beyond the file/line/column already
+  folded into Parse_Error's message (via fy_diag_error).
+
+  Not bound yet:
+  - fy_mark (line/column/position) accessors
+  - FYPCF_CREATE_MARKERS parser config flag (controls whether markers
+    are retained at all)
+  - fy_node_get_start_token / token-based position lookup for an
+    arbitrary Node
+  - fy_node_report and similar node/token-level diagnostic-with-location
+    functions
+
+  Would let a caller report "this node's value is malformed" with its
+  own source location, e.g. for the typed-scalar Data_Error cases
+  (Integer_Value, Boolean_Value, etc.) -- currently those errors carry
+  only the offending text, no line/column. Reasonable follow-on to the
+  typed-accessors work.
+* TODO Analyze how alibfyaml interacts with libfyaml's zero-copy string handling
+  libfyaml avoids copying strings wherever the decoded value coincides
+  with the source bytes:
+
+  - Parsed input: the source buffer isn't copied into a fresh buffer.
+    For fy_document_build_from_string, the document keeps pointers
+    directly into the caller-supplied string, which must outlive the
+    document (confirmed the hard way: freeing it early produced
+    garbage scalar values -- this is exactly the bug fixed in
+    Libfyaml.Documents.Parse_String via the new Owned_Buffer field).
+    For file input, the FYPCF_DISABLE_MMAP_OPT flag implies the
+    default path mmaps the file rather than reading it into an owned
+    buffer.
+  - Scalars are pointer+length spans into that buffer, not allocated
+    strings: fy_node_get_scalar returns a `const char *` plus an
+    explicit length, not a null-terminated copy. A plain unquoted
+    scalar's decoded value equals its source bytes, so it can just be
+    a span into the original memory.
+  - Copying only happens where required: quoted scalars with escapes,
+    and folded/literal block scalars, can't be represented as a plain
+    source span, so those do allocate/copy. This shows up directly in
+    the API as paired functions like fy_node_create_scalar (no copy,
+    caller's memory must stay valid for the document's lifetime) vs.
+    fy_node_create_scalar_copy (copies, safe to free the source right
+    away) -- alibfyaml currently only binds the _copy variant in
+    Libfyaml.Documents.Create_Scalar.
+
+  Need to analyze what this means for alibfyaml more broadly, beyond
+  the one bug already fixed:
+  - Are there other spots besides Parse_String where a buffer/string
+    passed across the Ada/C boundary needs to outlive something it
+    currently doesn't (Insert_At paths, mapping keys via
+    fy_node_mapping_lookup_value_by_string, etc.)?
+  - Should alibfyaml expose the non-copying fy_node_create_scalar
+    (zero-copy construction) as an option alongside Create_Scalar,
+    with clear Ada-side ownership/lifetime documentation, for callers
+    who want to avoid the copy?
+  - Document the general rule for binding consumers: which Node-
+    returning accessors hand back data whose lifetime is tied to the
+    Document's input buffer vs. document-owned storage.
