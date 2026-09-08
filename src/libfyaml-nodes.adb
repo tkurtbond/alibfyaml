@@ -27,27 +27,66 @@ package body Libfyaml.Nodes is
       then S (S'First + 1 .. S'Last)
       else S);
 
-   function Digit_Count (S : String; From : Positive) return Natural is
-      I     : Positive := From;
-      Count : Natural := 0;
+   type Digit_Predicate is not null access function (C : Character) return Boolean;
+
+   function Is_Dec_Digit (C : Character) return Boolean is (C in '0' .. '9');
+   function Is_Hex_Digit (C : Character) return Boolean is
+     (C in '0' .. '9' | 'a' .. 'f' | 'A' .. 'F');
+   function Is_Oct_Digit (C : Character) return Boolean is (C in '0' .. '7');
+   function Is_Bin_Digit (C : Character) return Boolean is (C in '0' .. '1');
+
+   --  Length of the maximal run starting at S (From) matching the
+   --  grammar digit ('_' digit)* under the given digit predicate (0 if
+   --  S (From) itself isn't a digit, or From is past S'Last). A single
+   --  underscore is accepted only strictly between two digits -- never
+   --  leading, trailing, or doubled -- which is exactly Ada's own
+   --  numeral syntax (RM 2.1: numeral ::= digit {['_'] digit}), so the
+   --  matched text (underscores included) can be handed to T'Value
+   --  verbatim: this is what lets alibfyaml accept "1_000_000" or
+   --  "0xFF_FF" as an extension (see README.md) without any separate
+   --  underscore-stripping step.
+   function Digit_Run_Length
+     (S : String; From : Positive; Is_Digit : Digit_Predicate) return Natural
+   is
+      I : Positive := From;
    begin
-      while I <= S'Last and then S (I) in '0' .. '9' loop
-         Count := Count + 1;
-         I := I + 1;
+      if I > S'Last or else not Is_Digit (S (I)) then
+         return 0;
+      end if;
+      I := I + 1;
+      loop
+         exit when I > S'Last;
+         if Is_Digit (S (I)) then
+            I := I + 1;
+         elsif S (I) = '_' and then I + 1 <= S'Last and then Is_Digit (S (I + 1)) then
+            I := I + 2;
+         else
+            exit;
+         end if;
       end loop;
-      return Count;
-   end Digit_Count;
+      return I - From;
+   end Digit_Run_Length;
 
    function Is_Digit_Run (S : String) return Boolean is
-     (S'Length > 0 and then (for all Ch of S => Ch in '0' .. '9'));
+     (S'Length > 0
+      and then Digit_Run_Length (S, S'First, Is_Dec_Digit'Access) = S'Length);
 
    function Is_Hex_Digit_Run (S : String) return Boolean is
      (S'Length > 0
-      and then (for all Ch of S => Ch in '0' .. '9' | 'a' .. 'f' | 'A' .. 'F'));
+      and then Digit_Run_Length (S, S'First, Is_Hex_Digit'Access) = S'Length);
 
    function Is_Octal_Digit_Run (S : String) return Boolean is
-     (S'Length > 0 and then (for all Ch of S => Ch in '0' .. '7'));
+     (S'Length > 0
+      and then Digit_Run_Length (S, S'First, Is_Oct_Digit'Access) = S'Length);
 
+   function Is_Binary_Digit_Run (S : String) return Boolean is
+     (S'Length > 0
+      and then Digit_Run_Length (S, S'First, Is_Bin_Digit'Access) = S'Length);
+
+   --  "0b" (binary) is a documented alibfyaml extension, not part of
+   --  YAML 1.2 core schema -- see README.md. (libfyaml's own generics
+   --  layer, which alibfyaml does not bind, also recognizes "0b" but
+   --  only under an explicit YAML 1.1 schema selection.)
    function Is_Integer_Text (S : String) return Boolean is
       B : constant String := Strip_Sign (S);
    begin
@@ -55,6 +94,8 @@ package body Libfyaml.Nodes is
          return Is_Hex_Digit_Run (B (B'First + 2 .. B'Last));
       elsif B'Length >= 2 and then B (B'First .. B'First + 1) = "0o" then
          return Is_Octal_Digit_Run (B (B'First + 2 .. B'Last));
+      elsif B'Length >= 2 and then B (B'First .. B'First + 1) = "0b" then
+         return Is_Binary_Digit_Run (B (B'First + 2 .. B'Last));
       else
          return Is_Digit_Run (B);
       end if;
@@ -67,27 +108,27 @@ package body Libfyaml.Nodes is
    --  implementation delegating straight to Float'Value/Long_Float'Value
    --  once the shape is confirmed, rather than reformatting the text).
    function Is_Float_Text (S : String) return Boolean is
-      B                              : constant String := Strip_Sign (S);
-      Pos                            : Positive;
-      Int_Digits, Frac_Digits, Exp_Digits : Natural;
+      B                        : constant String := Strip_Sign (S);
+      Pos                      : Positive;
+      Int_Len, Frac_Len, Exp_Len : Natural;
    begin
       if B'Length = 0 then
          return False;
       end if;
       Pos := B'First;
-      Int_Digits := Digit_Count (B, Pos);
-      if Int_Digits = 0 then
+      Int_Len := Digit_Run_Length (B, Pos, Is_Dec_Digit'Access);
+      if Int_Len = 0 then
          return False;
       end if;
-      Pos := Pos + Int_Digits;
+      Pos := Pos + Int_Len;
 
       if Pos <= B'Last and then B (Pos) = '.' then
          Pos := Pos + 1;
-         Frac_Digits := Digit_Count (B, Pos);
-         if Frac_Digits = 0 then
+         Frac_Len := Digit_Run_Length (B, Pos, Is_Dec_Digit'Access);
+         if Frac_Len = 0 then
             return False;
          end if;
-         Pos := Pos + Frac_Digits;
+         Pos := Pos + Frac_Len;
       end if;
 
       if Pos <= B'Last and then (B (Pos) = 'e' or else B (Pos) = 'E') then
@@ -95,11 +136,11 @@ package body Libfyaml.Nodes is
          if Pos <= B'Last and then (B (Pos) = '+' or else B (Pos) = '-') then
             Pos := Pos + 1;
          end if;
-         Exp_Digits := Digit_Count (B, Pos);
-         if Exp_Digits = 0 then
+         Exp_Len := Digit_Run_Length (B, Pos, Is_Dec_Digit'Access);
+         if Exp_Len = 0 then
             return False;
          end if;
-         Pos := Pos + Exp_Digits;
+         Pos := Pos + Exp_Len;
       end if;
 
       return Pos > B'Last;
@@ -117,9 +158,11 @@ package body Libfyaml.Nodes is
    function Is_Null_Text (S : String) return Boolean is
      (S = "~" or else S = "null" or else S = "Null" or else S = "NULL");
 
-   --  Rewrite a validated "0x.."/"0o.." integer literal into the Ada
-   --  based-literal form (e.g. "0x1A" -> "16#1A#") that Integer'Value
-   --  and friends accept; a plain decimal literal passes through as-is.
+   --  Rewrite a validated "0x.."/"0o.."/"0b.." integer literal into the
+   --  Ada based-literal form (e.g. "0x1A" -> "16#1A#") that
+   --  Integer'Value and friends accept; a plain decimal literal (with
+   --  or without underscore separators -- Ada's own numeral syntax
+   --  already accepts those) passes through as-is.
    function Integer_Literal_Text (S : String) return String is
       Sign : constant String :=
         (if S'Length > 0 and then (S (S'First) = '+' or else S (S'First) = '-')
@@ -132,6 +175,8 @@ package body Libfyaml.Nodes is
          return Sign & "16#" & Rest (Rest'First + 2 .. Rest'Last) & "#";
       elsif Rest'Length >= 2 and then Rest (Rest'First .. Rest'First + 1) = "0o" then
          return Sign & "8#" & Rest (Rest'First + 2 .. Rest'Last) & "#";
+      elsif Rest'Length >= 2 and then Rest (Rest'First .. Rest'First + 1) = "0b" then
+         return Sign & "2#" & Rest (Rest'First + 2 .. Rest'Last) & "#";
       else
          return S;
       end if;

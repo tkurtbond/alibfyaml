@@ -42,9 +42,47 @@ It intentionally does **not** cover:
   a tree node (predicates, scalar/sequence/mapping access, path lookup).
 * `src/libfyaml-documents.ads/.adb` — `Document`: an RAII (controlled)
   owner of a parsed or freshly-built tree (parse, build, emit).
-* `test/` — `test_quickstart.adb` (an Ada port of `examples/quick-start.c`)
-  and `test_sequence.adb`, both built and run against a local libfyaml
-  build as part of developing this binding.
+* `test/` — built and run against a local libfyaml build as part of
+  developing this binding: `test_quickstart.adb` (an Ada port of
+  `examples/quick-start.c`), `test_sequence.adb`, `test_scalars.adb`
+  (exhaustive coverage of the typed scalar accessors below), and
+  `test_navigate.adb` (a worked example of tree navigation, not a
+  pass/fail test).
+
+## Typed scalar accessors
+
+libfyaml's core layer only hands back scalar content as text; it does
+not resolve `"8"` to an integer or `"true"` to a boolean. `Libfyaml.Nodes`
+resolves this on the Ada side: `Integer_Value`, `Long_Integer_Value`,
+`Long_Long_Integer_Value`, `Float_Value`, `Long_Float_Value`,
+`Boolean_Value`, and `String_Value`, each as a per-node accessor and as
+`(Map, Key)` required (raising `Libfyaml.Missing_Key` if absent,
+`Libfyaml.Data_Error` if present but malformed) and optional-with-default
+forms. Resolution follows
+[YAML 1.2's core schema](https://yaml.org/spec/1.2.2/#103-core-schema):
+decimal/`0x`-hex/`0o`-octal integers, decimal-with-exponent floats, and
+`true`/`True`/`TRUE`/`false`/`False`/`FALSE` booleans. See `PLAN.md` for
+the full design and `src/libfyaml-nodes.ads` for exact signatures.
+
+### Extensions beyond YAML 1.2 core schema
+
+Two accepted integer forms are a deliberate, documented extension
+beyond what YAML 1.2 core schema itself defines:
+
+* **`0b` binary** (e.g. `0b1010`): not part of YAML 1.2 core schema at
+  all — it's a YAML 1.1 form. libfyaml's own *generics* layer (which
+  this binding doesn't cover — see Scope above) recognizes it too, but
+  only under an explicit YAML 1.1 schema selection; this binding
+  accepts it unconditionally, regardless of the rest of the document
+  otherwise following 1.2 core schema.
+* **`_` as a digit separator** (e.g. `1_000_000`, `0xFF_FF`, `1_234.5_6`):
+  accepted in decimal/hex/octal/binary integers and in the integer,
+  fractional, and exponent parts of floats. A single underscore is
+  accepted only strictly between two digits — never leading, trailing,
+  or doubled.
+
+Everything else — booleans, plain decimal/`0x`/`0o` integers, plain
+floats — follows YAML 1.2 core schema exactly, no extensions.
 
 ## Building
 

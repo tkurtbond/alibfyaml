@@ -12,6 +12,12 @@ int_hex: 0x1A
 int_oct: 0o17
 int_zero: 0
 
+# "0b" binary and "_" digit separators are alibfyaml extensions, not
+# part of YAML 1.2 core schema -- see README.md.
+int_bin: 0b1010
+int_underscore: 1_000_000
+int_hex_underscore: 0xFF_FF
+
 # Exceeds Integer'Last (2_147_483_647) but fits Long_Integer and
 # Long_Long_Integer (both 64-bit on this platform).
 big_int: 5000000000
@@ -19,6 +25,7 @@ big_int: 5000000000
 float_val: 3.5
 float_exp: 1.5e2
 float_neg: -2.25
+float_underscore: 1_234.5_6
 
 # Exceeds Float'Last (~3.4e38, 32-bit) but fits Long_Float (~1.8e308,
 # 64-bit).
@@ -41,3 +48,14 @@ not_scalar:
 
 # Present, but not a valid integer/float/boolean in any form.
 malformed: banana
+
+# Malformed digit-separator placement: leading, trailing, and doubled
+# underscores are all rejected (Ada's own numeral syntax -- which the
+# "_" extension deliberately follows -- requires a single underscore
+# strictly between two digits).
+bad_underscore_leading: _123
+bad_underscore_trailing: 123_
+bad_underscore_double: 1__2
+
+# "2" is not a valid binary digit.
+bad_binary: 0b102

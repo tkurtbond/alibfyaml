@@ -77,7 +77,15 @@ Proposed v1 scope:
   1.2/JSON, so accepting them would be inventing a laxer schema than
   the format itself defines. Open question below in case a consumer
   needs them.
-- **Integer**: decimal, with `0x`/`0o` accepted per core schema.
+- **Integer**: decimal, with `0x`/`0o` accepted per core schema, plus
+  two deliberate extensions beyond core schema (documented in
+  README.md, not silently added): `0b` binary (a YAML 1.1 form, not
+  1.2 core schema — libfyaml's own generics layer, which this binding
+  doesn't cover, only accepts it under an explicit YAML 1.1 schema
+  selection), and `_` as a digit separator in any base, accepted only
+  strictly between two digits (matching Ada's own numeral syntax,
+  which is also how the implementation gets this for free —
+  underscores pass straight through to `Integer'Value` and friends).
   Provide `Integer`, `Long_Integer`, and `Long_Long_Integer` accessors
   — all three, not just `Integer`/`Long_Long_Integer`, since a general
   binding shouldn't force every caller needing more than 32 (or fewer

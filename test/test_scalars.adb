@@ -108,6 +108,15 @@ begin
       Check ("Integer_Value (int_oct) = 15", Map.Integer_Value ("int_oct") = 15);
       Check ("Integer_Value (int_zero) = 0", Map.Integer_Value ("int_zero") = 0);
 
+      --  Extensions beyond YAML 1.2 core schema (see README.md):
+      --  "0b" binary, and "_" as a digit separator in any base.
+      Check ("Integer_Value (int_bin) = 10 (0b extension)",
+             Map.Integer_Value ("int_bin") = 10);
+      Check ("Integer_Value (int_underscore) = 1_000_000 (_ extension)",
+             Map.Integer_Value ("int_underscore") = 1_000_000);
+      Check ("Integer_Value (int_hex_underscore) = 65535 (0x + _ extension)",
+             Map.Integer_Value ("int_hex_underscore") = 65535);
+
       Check ("Long_Integer_Value (int_dec) = 42",
              Map.Long_Integer_Value ("int_dec") = 42);
       Check ("Long_Long_Integer_Value (big_int) = 5_000_000_000",
@@ -118,6 +127,8 @@ begin
              Map.Float_Value ("float_exp") = 150.0);
       Check ("Float_Value (float_neg) = -2.25",
              Map.Float_Value ("float_neg") = -2.25);
+      Check ("Float_Value (float_underscore) = 1234.56 (_ extension)",
+             Map.Float_Value ("float_underscore") = 1234.56);
       Check ("Long_Float_Value (float_overflow) > 1.0",
              Map.Long_Float_Value ("float_overflow") > 1.0);
 
@@ -239,6 +250,61 @@ begin
 
       Check ("String_Value (malformed) = ""banana"" (no error)",
              Map.String_Value ("malformed") = "banana");
+
+      -----------------------------------------------------------------
+      --  Data_Error: malformed digit-separator placement, and an
+      --  invalid binary digit.
+      -----------------------------------------------------------------
+      declare
+         procedure Try is
+            Unused : constant Integer :=
+              Map.Integer_Value ("bad_underscore_leading");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Data_Error
+           ("Integer_Value (bad_underscore_leading) -> Data_Error", Try'Access);
+      end;
+
+      declare
+         procedure Try is
+            Unused : constant Integer :=
+              Map.Integer_Value ("bad_underscore_trailing");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Data_Error
+           ("Integer_Value (bad_underscore_trailing) -> Data_Error", Try'Access);
+      end;
+
+      declare
+         procedure Try is
+            Unused : constant Integer :=
+              Map.Integer_Value ("bad_underscore_double");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Data_Error
+           ("Integer_Value (bad_underscore_double) -> Data_Error", Try'Access);
+      end;
+
+      declare
+         procedure Try is
+            Unused : constant Integer := Map.Integer_Value ("bad_binary");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Data_Error
+           ("Integer_Value (bad_binary) -> Data_Error", Try'Access);
+      end;
 
       -----------------------------------------------------------------
       --  Data_Error: numeric range overflow (Integer/Float only --
