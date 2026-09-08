@@ -15,6 +15,9 @@
 --      accessor appropriate to what it's known to hold. This is the
 --      shape most real programs actually use, once the document's
 --      structure (a config file format, say) is known in advance.
+--      Includes a deeply nested (4 levels) example, reached three
+--      ways: chained Value/Item, a single By_Path call, and nested
+--      Iterate over every element at each level.
 
 with Ada.Text_IO;
 with Libfyaml.Documents;
@@ -163,6 +166,56 @@ begin
                   Endpoint.Boolean_Value ("public")'Image & ")");
             end;
          end loop;
+      end;
+
+      -----------------------------------------------------------------
+      --  4 levels of nesting: company -> departments (sequence) ->
+      --  department (mapping) -> teams (sequence) -> team (mapping).
+      --  Three ways to reach the same deeply nested field.
+      -----------------------------------------------------------------
+      Ada.Text_IO.New_Line;
+      Ada.Text_IO.Put_Line ("=== Deeply nested access (4 levels) ===");
+
+      --  (a) Chained Value/Item calls, indexing down one level at a
+      --  time -- Item is 1-based (see Libfyaml.Nodes).
+      Ada.Text_IO.Put_Line
+        ("chained: first team of first department, lead = " &
+         D.Root.Value ("company").Value ("departments").Item (1)
+           .Value ("teams").Item (1).String_Value ("lead"));
+
+      --  (b) The same field via By_Path, in one call. libfyaml's
+      --  native path syntax indexes sequences from 0, unlike Item.
+      Ada.Text_IO.Put_Line
+        ("By_Path: " &
+         D.Root.By_Path ("/company/departments/0/teams/0/lead").Scalar_Value);
+
+      --  (c) Nested Iterate: walk every department, and within each,
+      --  every team, reading typed fields (String_Value, Integer_Value)
+      --  at the bottom of the chain. This is the pattern for "process
+      --  every X" rather than "reach one known field".
+      declare
+         Departments : constant Nod.Node :=
+           D.Root.Value ("company").Value ("departments");
+
+         procedure Visit_Team (Team : Nod.Node) is
+         begin
+            Ada.Text_IO.Put_Line
+              ("    team " & Team.String_Value ("name") & ": size " &
+               Team.Integer_Value ("size")'Image & ", lead " &
+               Team.String_Value ("lead"));
+         end Visit_Team;
+
+         procedure Visit_Department (Department : Nod.Node) is
+         begin
+            Ada.Text_IO.Put_Line
+              ("  department " & Department.String_Value ("name") & ":");
+            Department.Value ("teams").Iterate (Visit_Team'Access);
+         end Visit_Department;
+      begin
+         Ada.Text_IO.Put_Line
+           ("nested Iterate over all departments/teams of " &
+            D.Root.Value ("company").String_Value ("name") & ":");
+         Departments.Iterate (Visit_Department'Access);
       end;
    end;
 end Test_Navigate;
