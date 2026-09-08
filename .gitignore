@@ -3,3 +3,11 @@ lib/
 test/obj/
 test/test_quickstart
 test/test_sequence
+
+
+*~
+.DS_Store
+.\#*
+.~
+.~*\#
+\#*\#
