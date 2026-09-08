@@ -57,3 +57,5 @@
   - Document the general rule for binding consumers: which Node-
     returning accessors hand back data whose lifetime is tied to the
     Document's input buffer vs. document-owned storage.
+* TODO Can alibfyaml be extended to read from existing Ada File_Type variables, like Current_Input and Standard_Input?
+How does that work with libfyaml's zero copy?
