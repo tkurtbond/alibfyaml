@@ -13,15 +13,9 @@ scalars lives in libfyaml's *generics* layer (`fy_generic`), which
 `_Generic`/variadic macros with no C-callable equivalent — see
 `src/libfyaml.ads`).
 
-This surfaced while planning `besm2_fmt`
-(`~/Repos/Ada/RPG/besm2_fmt/PLAN.md`), a port of a Chicken Scheme tool
-that relies on the `yaml` egg decoding scalars into native numbers/
-booleans automatically. That plan originally put a `Yaml_Access` typed-
-conversion layer *inside* `besm2_fmt`. On reflection this belongs in
-`alibfyaml` instead: "give me this mapping value as an `Integer`" is a
-generically useful binding feature, not something specific to one BESM
-tool, and every future consumer of `alibfyaml` would otherwise
-reinvent it.
+"Give me this mapping value as an `Integer`" is a generically useful
+binding feature that any consumer parsing typed data out of YAML will
+want, not something worth leaving to each caller to reinvent.
 
 Scope broadened after a follow-up question ("does alibfyaml support all
 the YAML data types and values: dates and timestamps, etc?"), which
@@ -38,8 +32,8 @@ structure" and "the caller gets the value they actually meant."
   that schema defines (null, bool, int, float), as plain Ada functions
   over `Node`/`Scalar_Value` — no change to the underlying C binding.
 - Fold in the "required key" / "optional key with default" pattern
-  that typed access needs anyway, so `besm2_fmt`'s planned
-  `Must_Integer`/`May_Integer` etc. collapse into direct calls here.
+  that typed access needs anyway, so a hand-rolled `Must_Integer`/
+  `May_Integer` pair isn't something every consumer writes for itself.
 - Keep failure modes distinct and explicit: a **missing** key is not
   the same problem as a **malformed** value, and callers need to tell
   them apart (an optional field defaults cleanly if absent, but should
@@ -128,9 +122,9 @@ function Float_Value          (N : Node) return Float;
 function Long_Float_Value     (N : Node) return Long_Float;
 function Boolean_Value        (N : Node) return Boolean;
 
---  Non-raising predicates, for variant/shape dispatch (as
---  besm2_fmt's format-customizers port needs: is this list element a
---  plain string or a [name, count] pair?).
+--  Non-raising predicates, for variant/shape dispatch — e.g. deciding
+--  whether a list element is a plain string or a structured
+--  [name, count]-style pair before committing to a conversion.
 function Is_Integer (N : Node) return Boolean;
 function Is_Float   (N : Node) return Boolean;
 function Is_Boolean (N : Node) return Boolean;
@@ -138,8 +132,8 @@ function Is_Boolean (N : Node) return Boolean;
 
 Mapping + key convenience forms — collapses `Value (Map, Key)` +
 `*_Value (N)` into one call, and folds in required/optional semantics
-directly (mirroring what `besm2_fmt`'s `Must_Integer`/`May_Integer`
-were going to hand-roll):
+directly (rather than leaving every consumer to hand-roll its own
+`Must_Integer`/`May_Integer` pair on top of `Value`/`*_Value`):
 
 ```ada
 --  Required: raises Missing_Key if absent, Data_Error if malformed.
@@ -181,22 +175,17 @@ callers who want the `Node` itself rather than an immediately-converted
 scalar — e.g. to check `Is_Sequence` before iterating a required list
 field.
 
-## Example (post-change `besm2_fmt` usage)
+## Example
 
 ```ada
 Points : constant Integer := Attribute.Integer_Value ("points");   -- required
 Level  : constant String  := Attribute.String_Value ("level", ""); -- optional
-Mecha  : constant Boolean := Entity.Has_Key ("mecha");             -- unchanged;
-   --  presence-check semantics are a besm2_fmt-level decision (see that
-   --  repo's PLAN.md open question), not something this layer should
-   --  paper over by guessing what "mecha: false" should mean.
+Mecha  : constant Boolean := Entity.Has_Key ("mecha");             -- presence
+   --  check only; Has_Key is unchanged by this plan. Whether "key present"
+   --  or "key present and true" is the right test for a given boolean-ish
+   --  field is a call-site decision, not something this layer should
+   --  paper over by guessing.
 ```
-
-With this in `alibfyaml`, `besm2_fmt`'s planned `Yaml_Access` package
-shrinks to just the BESM-specific field names/shapes (e.g. the
-`format-customizers` enhancement/limiter variant dispatch), not a
-general typed-conversion layer — that generic problem is solved once,
-here.
 
 ## Timestamps
 
@@ -341,9 +330,8 @@ additions to the existing `test/config.yaml`) covering:
   input).
 - **Generic/enumeration support**: a generic `function Enum_Value
   (N : Node) return Some_Enum` (via `'Value` on trimmed text) would be
-  a natural follow-on for YAML string-enum fields, but isn't needed by
-  `besm2_fmt` and adds API surface — deferred until a concrete need
-  shows up.
+  a natural follow-on for YAML string-enum fields, but adds API surface
+  with no concrete need driving it yet — deferred until one shows up.
 - **Big integers beyond `Long_Long_Integer`**: not planned; no known
   need.
 - **Timestamp UTC-offset preservation**: `Ada.Calendar.Time` drops the
