@@ -45,6 +45,45 @@ package Libfyaml.Nodes is
      with Pre => Is_Valid (N) and then Is_Scalar (N);
    --  The decoded scalar text (quotes/escapes already resolved).
 
+   ----------------------------------
+   --  Typed scalar node access    --
+   ----------------------------------
+   --
+   --  libfyaml's core layer (the layer this binding covers) hands back
+   --  scalars as plain text; it does not implicitly resolve "8" to an
+   --  integer or "true" to a boolean the way, e.g., a YAML library with
+   --  a schema-aware loader would. The functions below do that
+   --  resolution on the Ada side, following YAML 1.2's core schema
+   --  (https://yaml.org/spec/1.2.2/#103-core-schema): null (already
+   --  covered by Is_Null_Value above), bool, int, and float. See the
+   --  package body for the exact grammar accepted by each.
+
+   function Is_Integer (N : Node) return Boolean
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   function Is_Float (N : Node) return Boolean
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   function Is_Boolean (N : Node) return Boolean
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   --  Non-raising shape predicates, e.g. for deciding whether a list
+   --  element is a plain string or some other scalar shape before
+   --  committing to a conversion.
+
+   function Integer_Value (N : Node) return Integer
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   function Long_Integer_Value (N : Node) return Long_Integer
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   function Long_Long_Integer_Value (N : Node) return Long_Long_Integer
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   function Float_Value (N : Node) return Float
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   function Long_Float_Value (N : Node) return Long_Float
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   function Boolean_Value (N : Node) return Boolean
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   --  Raise Libfyaml.Data_Error if the scalar text doesn't match the
+   --  target type's grammar (including numeric-literal overflow for
+   --  the integer/float forms).
+
    ----------------------------
    --  Sequence node access  --
    ----------------------------
@@ -89,6 +128,65 @@ package Libfyaml.Nodes is
 
    procedure Iterate
      (Map : Node; Visit : not null access procedure (Key, Value : Node))
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+
+   ----------------------------
+   --  Typed mapping access  --
+   ----------------------------
+   --
+   --  Collapses Value (Map, Key) + a typed accessor above into one call,
+   --  with the "required" / "optional with default" split a real caller
+   --  needs: a missing key and a malformed value are different failure
+   --  modes, so an optional field's Default only substitutes for
+   --  *absence* -- if Key is present but its text can't be resolved as
+   --  the target type, Libfyaml.Data_Error is still raised.
+
+   function Required (Map : Node; Key : String) return Node
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   --  Like Value, but raises Libfyaml.Missing_Key instead of returning
+   --  Null_Node when Map has no such Key.
+
+   --  Required forms: raise Libfyaml.Missing_Key if Key is absent,
+   --  Libfyaml.Data_Error if present but not resolvable as the target
+   --  type.
+   function Integer_Value (Map : Node; Key : String) return Integer
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Long_Integer_Value (Map : Node; Key : String) return Long_Integer
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Long_Long_Integer_Value
+     (Map : Node; Key : String) return Long_Long_Integer
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Float_Value (Map : Node; Key : String) return Float
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Long_Float_Value (Map : Node; Key : String) return Long_Float
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Boolean_Value (Map : Node; Key : String) return Boolean
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function String_Value (Map : Node; Key : String) return String
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+
+   --  Optional forms: Default is returned when Key is absent.
+   function Integer_Value
+     (Map : Node; Key : String; Default : Integer) return Integer
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Long_Integer_Value
+     (Map : Node; Key : String; Default : Long_Integer) return Long_Integer
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Long_Long_Integer_Value
+     (Map : Node; Key : String; Default : Long_Long_Integer)
+      return Long_Long_Integer
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Float_Value
+     (Map : Node; Key : String; Default : Float) return Float
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Long_Float_Value
+     (Map : Node; Key : String; Default : Long_Float) return Long_Float
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function Boolean_Value
+     (Map : Node; Key : String; Default : Boolean) return Boolean
+     with Pre => Is_Valid (Map) and then Is_Mapping (Map);
+   function String_Value
+     (Map : Node; Key : String; Default : String) return String
      with Pre => Is_Valid (Map) and then Is_Mapping (Map);
 
    -----------------

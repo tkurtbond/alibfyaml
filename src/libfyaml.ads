@@ -27,4 +27,13 @@ package Libfyaml is
    Emit_Error : exception;
    --  Raised when emitting a document to a string or file fails.
 
+   Missing_Key : exception;
+   --  Raised by a required Libfyaml.Nodes typed accessor (Map, Key) form
+   --  when Map has no such key.
+
+   Data_Error : exception;
+   --  Raised by a Libfyaml.Nodes typed accessor when a scalar is present
+   --  but cannot be resolved as the requested type (e.g. Integer_Value
+   --  on a node holding "banana").
+
 end Libfyaml;
