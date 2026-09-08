@@ -1,4 +1,4 @@
-# Typed scalar accessors for alibfyaml
+# Typed scalar accessors, timestamps, and document resolution for alibfyaml
 
 ## Motivation
 
@@ -23,6 +23,15 @@ generically useful binding feature, not something specific to one BESM
 tool, and every future consumer of `alibfyaml` would otherwise
 reinvent it.
 
+Scope broadened after a follow-up question ("does alibfyaml support all
+the YAML data types and values: dates and timestamps, etc?"), which
+turned up two more gaps worth fixing at the same time: no way to parse
+YAML timestamps, and a currently-silent mishandling of anchors, aliases,
+and merge keys. Both are folded into this plan below rather than
+tracked separately, since they're all instances of the same underlying
+theme — closing the gap between "libfyaml hands back inert text/tree
+structure" and "the caller gets the value they actually meant."
+
 ## Design goals
 
 - Implement YAML 1.2 **core schema** scalar resolution for the types
@@ -36,6 +45,16 @@ reinvent it.
   them apart (an optional field defaults cleanly if absent, but should
   still raise if present-and-garbage).
 - Non-breaking, additive change to the existing `Libfyaml.Nodes` API.
+- Timestamps: implement entirely in Ada. libfyaml has **no** timestamp
+  concept anywhere — confirmed by `grep -ri timestamp` across the whole
+  libfyaml source tree (zero hits) and by `fy_generic_type`'s full
+  member list (`NULL, BOOL, INT, FLOAT, STRING, SEQUENCE, MAPPING,
+  INDIRECT, ALIAS` — no date/time variant). So this is explicitly a
+  beyond-core-schema, `alibfyaml`-only convenience, not a binding to
+  anything libfyaml itself does.
+- Anchors/aliases/merge keys: stop the current silent-wrong-data
+  behavior (see the dedicated section below) — this is a correctness
+  fix, not just an API addition.
 
 ## Scope: which types, which schema rules
 
@@ -173,6 +192,115 @@ shrinks to just the BESM-specific field names/shapes (e.g. the
 general typed-conversion layer — that generic problem is solved once,
 here.
 
+## Timestamps
+
+Not part of YAML 1.2 core schema, and not implemented by libfyaml at
+any layer (see Design goals above) — this is new Ada-side parsing over
+`Scalar_Value`'s text, never delegated to the C library.
+
+**Format accepted:** the YAML 1.1 `!!timestamp` grammar, which is the
+de facto convention most real-world YAML implements regardless of which
+spec version they otherwise follow (PyYAML, SnakeYAML, Chicken's `yaml`
+egg, etc. all implement it this way):
+
+- date-only: `YYYY-MM-DD`
+- full: `YYYY-MM-DD` then either `T` or one-or-more spaces, then
+  `HH:MM:SS`, then an optional `.` and fractional-second digits of any
+  length, then an optional zone: nothing (implies UTC), `Z`, or
+  `±HH:MM`/`±HH` with optional surrounding whitespace before it (the
+  1.1 grammar is deliberately lax here).
+
+**API:**
+
+```ada
+function Timestamp_Value (N : Node) return Ada.Calendar.Time;
+function Is_Timestamp    (N : Node) return Boolean;   -- shape check, non-raising
+
+function Timestamp_Value (Map : Node; Key : String) return Ada.Calendar.Time;
+function Timestamp_Value
+  (Map : Node; Key : String; Default : Ada.Calendar.Time) return Ada.Calendar.Time;
+```
+
+Same `Missing_Key`/`Data_Error` conventions as the numeric accessors.
+Needs `Ada.Calendar`, `Ada.Calendar.Formatting`, and
+`Ada.Calendar.Time_Zones` — all standard, no new external dependency.
+
+**Implementation approach:** `Ada.Calendar.Formatting.Value` expects one
+fixed format and won't handle the full grammar above (arbitrary
+fractional-second precision, `T`-or-space separator, optional zone,
+date-only form), so this needs a small hand-written scanner that pulls
+out year/month/day/hour/minute/second/sub-second/zone-offset fields from
+the scalar text, then calls `Ada.Calendar.Formatting.Time_Of` — which
+does accept a `Time_Zone` parameter (an offset in minutes) — to fold the
+parsed zone offset into the correct absolute `Time` value.
+
+**Design decision to flag explicitly:** `Ada.Calendar.Time` has no
+memory of the original UTC offset — a timestamp parsed as `... +05:00`
+and one parsed as `... Z` that name the same instant become
+indistinguishable `Time` values. That's a real information loss versus
+the source YAML, accepted here as the simple v1 behavior (matches what
+most timestamp-consuming code wants — a comparable/absolute instant, not
+the writer's local clock). Preserving the original offset would need a
+small dedicated record type instead of bare `Ada.Calendar.Time`; noted
+as an open question below rather than built now.
+
+## Anchors, aliases, merge keys, and explicit tags
+
+**Current gap, precisely:** `Libfyaml.Documents.Parse_String`/
+`Parse_File` never set `FYPCF_RESOLVE_DOCUMENT`, and `alibfyaml` doesn't
+bind `fy_document_resolve()` at all. Concretely, this means an anchored
+node (`&foo ...`) parses and queries fine at its point of definition,
+but a node referencing it (`*foo`) sits in the tree as a node whose
+`fy_node_get_type` is `FYNT_SCALAR` and whose *style* is `FYNS_ALIAS`
+(confirmed in the libfyaml source: `fy_node_is_alias` is
+`fy_node_get_type(fyn) == FYNT_SCALAR && fy_node_get_style(fyn) ==
+FYNS_ALIAS` — another `static inline` convenience wrapper, not an
+exported symbol, exactly the same situation `Is_Scalar`/`Is_Sequence`/
+`Is_Mapping` were already in and were reimplemented in Ada for). Calling
+today's `Scalar_Value` on such a node does **not** give the referenced
+content — it gives whatever the alias token's own text is, silently.
+Same story for `<<: *foo` merge keys: unresolved, the mapping just has a
+literal `"<<"` key whose value is an unresolved alias, not the merged-in
+pairs.
+
+**This is worth prioritizing over "missing feature":** it's a
+silent-wrong-output bug class today, not a loud missing-feature error —
+any current `alibfyaml` consumer whose YAML happens to use anchors,
+aliases, or merge keys is already getting incorrect data without any
+indication of it.
+
+**Fix, two parts:**
+
+1. **Bind the missing pieces in `Libfyaml.Thin`** (all confirmed
+   `FY_EXPORT` real symbols, not inline wrappers): `fy_document_resolve`,
+   `fy_node_get_style`, `fy_node_get_anchor`, `fy_anchor_get_text`,
+   `fy_anchor_node`, `fy_document_lookup_anchor` (and
+   `_by_token`/`_by_node` variants), `fy_node_resolve_alias`,
+   `fy_node_dereference`, and `fy_node_get_tag` (raw explicit-tag text,
+   e.g. `tag:yaml.org,2002:str` or a custom `!mytag` — also the way to
+   detect an explicit `!!timestamp` tag distinct from a plain scalar
+   that merely looks date-shaped, cross-referencing the Timestamps
+   section above).
+
+2. **Expose in the thick API:**
+   - `Libfyaml.Nodes.Is_Alias (N : Node) return Boolean` — reimplemented
+     in Ada from `fy_node_get_type`/`fy_node_get_style`, same treatment
+     as `Is_Scalar`/`Is_Sequence`/`Is_Mapping`.
+   - `Libfyaml.Nodes.Tag (N : Node) return String` — wraps
+     `fy_node_get_tag`; `""` if the node has no explicit tag.
+   - `Libfyaml.Documents.Resolve (Doc : in out Document)` — wraps
+     `fy_document_resolve`; raises a new `Libfyaml.Resolve_Error`
+     exception (the C call returns 0/-1) on failure. Needed for
+     documents built programmatically (`Create_*`/`Set_Root`) rather
+     than parsed.
+   - A `Resolve_Anchors : Boolean := False` parameter added to
+     `Parse_String`/`Parse_File`, setting `FYPCF_RESOLVE_DOCUMENT` in
+     `Fy_Parse_Cfg.Flags` when `True` (one code path, rather than
+     parse-then-separately-call-`Resolve`).
+
+   The `False` default is a placeholder, not a settled decision — see
+   open questions.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or
@@ -183,6 +311,13 @@ additions to the existing `test/config.yaml`) covering:
 - an absent key in required form (expect `Missing_Key`) and optional
   form (expect `Default` returned)
 - hex/octal integer forms, boolean case variants
+- timestamps: date-only, `T`- and space-separated, fractional seconds,
+  `Z`, `+HH:MM`/`-HH:MM` offsets, and a malformed case (expect
+  `Data_Error`)
+- a YAML fixture using an anchor + alias and a `<<:` merge key: verify
+  the *unparsed* tree shows the alias node via `Is_Alias`/`Tag` as
+  described above, then verify `Resolve`/`Resolve_Anchors => True`
+  produces the merged/dereferenced content
 - a new `test_scalars.adb` mirroring the existing `test_quickstart.adb`/
   `test_sequence.adb` pattern, added to `test/test.gpr`'s `Main` list
 
@@ -202,8 +337,27 @@ additions to the existing `test/config.yaml`) covering:
   shows up.
 - **Big integers beyond `Long_Long_Integer`**: not planned; no known
   need.
+- **Timestamp UTC-offset preservation**: `Ada.Calendar.Time` drops the
+  original zone offset (see Timestamps section). Add a
+  `Timestamp_With_Offset` record type later if a concrete need for the
+  original offset shows up; not built in v1.
+- **`Resolve_Anchors` default value**: proposed `False` above to avoid a
+  silent behavior change for any existing caller, but there's a real
+  argument for defaulting to `True` instead — a YAML *library* silently
+  mis-decoding anchored input by default is arguably the worse surprise
+  for a new caller, and `alibfyaml` has no released consumers yet to
+  break. Needs a decision before implementing, not just a placeholder.
+- **Should `Resolve` failure be recoverable?** `fy_document_resolve`
+  returns -1 on error (e.g. a merge-key cycle); need to decide whether
+  `Libfyaml.Resolve_Error` leaves the `Document` in a still-usable
+  (just-unresolved) state or whether failure should be treated as fatal
+  to that `Document`, matching how `Parse_Error` behaves today.
 
 ## Non-breaking
 
-Purely additive to `Libfyaml.Nodes` and `Libfyaml`: new functions and
-two new exceptions, no signature changes to anything existing.
+Purely additive to `Libfyaml.Nodes`, `Libfyaml.Documents`, and
+`Libfyaml`: new functions, one new optional constructor parameter (with
+a default, so existing call sites are unaffected regardless of what that
+default ends up being), and three new exceptions (`Missing_Key`,
+`Data_Error`, `Resolve_Error`). No signature changes to anything
+existing.
