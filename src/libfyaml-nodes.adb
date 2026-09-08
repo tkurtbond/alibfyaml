@@ -108,6 +108,15 @@ package body Libfyaml.Nodes is
    function Is_Boolean_Text (S : String) return Boolean is
      (S in "true" | "True" | "TRUE" | "false" | "False" | "FALSE");
 
+   --  YAML 1.2 core schema null spellings. Deliberately excludes "":
+   --  an explicit quoted "" is a deliberate empty *string*, not null;
+   --  the unquoted-omitted case (e.g. "key:" with nothing after) is
+   --  handled separately, by libfyaml's own fy_node_is_null, which
+   --  distinguishes it correctly from an explicit "" at the token
+   --  level rather than by text content.
+   function Is_Null_Text (S : String) return Boolean is
+     (S = "~" or else S = "null" or else S = "Null" or else S = "NULL");
+
    --  Rewrite a validated "0x.."/"0o.." integer literal into the Ada
    --  based-literal form (e.g. "0x1A" -> "16#1A#") that Integer'Value
    --  and friends accept; a plain decimal literal passes through as-is.
@@ -149,9 +158,6 @@ package body Libfyaml.Nodes is
    function Is_Mapping (N : Node) return Boolean is
      (Thin.fy_node_get_type (N.Handle) = Thin.FYNT_MAPPING);
 
-   function Is_Null_Value (N : Node) return Boolean is
-     (Boolean (Thin.fy_node_is_null (N.Handle)));
-
    function Scalar_Value (N : Node) return String is
       Len : aliased C.size_t;
       Ptr : constant CS.chars_ptr := Thin.fy_node_get_scalar (N.Handle, Len'Access);
@@ -161,6 +167,10 @@ package body Libfyaml.Nodes is
       end if;
       return CS.Value (Ptr, Len);
    end Scalar_Value;
+
+   function Is_Null_Value (N : Node) return Boolean is
+     (Boolean (Thin.fy_node_is_null (N.Handle))
+      or else (Is_Scalar (N) and then Is_Null_Text (Trimmed (Scalar_Value (N)))));
 
    function Is_Integer (N : Node) return Boolean is
      (Is_Integer_Text (Trimmed (Scalar_Value (N))));

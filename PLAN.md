@@ -3,15 +3,22 @@
 ## Motivation
 
 libfyaml's core API — the layer `alibfyaml` binds — deliberately hands
-back scalar content as text (`fy_node_get_scalar`/`Scalar_Value`), with
-one exception: `fy_node_is_null` / `Is_Null_Value`, which *is* a real
-core-layer predicate, so "is this the null scalar" is already resolved
-by the C library. Everything else — is `"8"` an integer, is `"true"` a
-boolean, is `"3.5"` a float — is left to the caller. Implicit typing of
-scalars lives in libfyaml's *generics* layer (`fy_generic`), which
-`alibfyaml` doesn't bind (its ergonomic constructors are C11
+back scalar content as text (`fy_node_get_scalar`/`Scalar_Value`). Is
+`"8"` an integer, is `"true"` a boolean, is `"3.5"` a float — none of
+that is resolved by the C library; it's left to the caller. Implicit
+typing of scalars lives in libfyaml's *generics* layer (`fy_generic`),
+which `alibfyaml` doesn't bind (its ergonomic constructors are C11
 `_Generic`/variadic macros with no C-callable equivalent — see
 `src/libfyaml.ads`).
+
+(`fy_node_is_null`/`Is_Null_Value` looked at first like a real
+core-layer exception to this — turned out not to be, once actually
+implemented and tested against literal `~`/`null` text: libfyaml's
+`fy_node_is_null` only catches a genuinely *empty/omitted* scalar,
+e.g. `key:` with nothing after it, which is unambiguous at the
+grammar level regardless of schema. It does not recognize the literal
+text `~`/`null`/`Null`/`NULL` as null — that resolution had to be
+added on the Ada side too, the same as everything else here.)
 
 "Give me this mapping value as an `Integer`" is a generically useful
 binding feature that any consumer parsing typed data out of YAML will
@@ -79,8 +86,9 @@ Proposed v1 scope:
 - **Float**: decimal + exponent form. `.inf`/`-.inf`/`.nan` deferred to
   an open question (rare in practice; easy to add later without an API
   break).
-- Null resolution already exists (`Is_Null_Value`); typed accessors
-  don't re-decide it.
+- Null resolution is `Is_Null_Value` (see the Motivation correction
+  above: this needed a real Ada-side fix too, not just libfyaml's
+  empty-scalar case); typed accessors don't re-decide it.
 
 All parsing is whitespace-trimmed defensively even though libfyaml's
 scalar decoding should already hand back trimmed content for plain

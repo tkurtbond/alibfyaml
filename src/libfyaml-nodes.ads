@@ -35,7 +35,16 @@ package Libfyaml.Nodes is
      with Pre => Is_Valid (N);
    function Is_Null_Value (N : Node) return Boolean
      with Pre => Is_Valid (N);
-   --  True if N is the scalar YAML/JSON null (~, null, Null, NULL).
+   --  True if N is an empty/omitted scalar (e.g. "key:" with nothing
+   --  after it -- libfyaml's core layer resolves this case, since it's
+   --  unambiguous at the grammar level) OR a scalar whose text is one
+   --  of the YAML 1.2 core schema null spellings (~, null, Null, NULL).
+   --  The latter is resolved here, in Ada, the same way as the other
+   --  typed-scalar accessors below -- libfyaml's core layer does not
+   --  resolve it (a quoted "" is a deliberate empty *string*, not
+   --  null, and libfyaml's own empty-scalar check already handles the
+   --  unquoted-omitted case correctly, so text equal to "" is
+   --  deliberately not treated as a null spelling here).
 
    --------------------------
    --  Scalar node access  --
