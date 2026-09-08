@@ -31,11 +31,13 @@ package Libfyaml.Thin is
    type Fy_Node     is new System.Address;
    type Fy_Node_Pair is new System.Address;
    type Fy_Diag     is new System.Address;
+   type Fy_Parser   is new System.Address;
 
    Null_Fy_Document  : constant Fy_Document  := Fy_Document (System.Null_Address);
    Null_Fy_Node      : constant Fy_Node      := Fy_Node (System.Null_Address);
    Null_Fy_Node_Pair : constant Fy_Node_Pair := Fy_Node_Pair (System.Null_Address);
    Null_Fy_Diag      : constant Fy_Diag      := Fy_Diag (System.Null_Address);
+   Null_Fy_Parser    : constant Fy_Parser    := Fy_Parser (System.Null_Address);
 
    -----------------------
    --  fy_node_type enum --
@@ -129,6 +131,30 @@ package Libfyaml.Thin is
      (Cfg : access constant Fy_Parse_Cfg;
       File : CS.chars_ptr) return Fy_Document
      with Import, Convention => C, External_Name => "fy_document_build_from_file";
+
+   -----------------------------------------------------------------
+   --  Streaming parser: multiple documents from one input
+   --  (Libfyaml.Documents.Streams.Document_Stream). Distinct from
+   --  fy_document_build_from_string/_file above, which build
+   --  exactly one document.
+   -----------------------------------------------------------------
+
+   function fy_parser_create (Cfg : access constant Fy_Parse_Cfg) return Fy_Parser
+     with Import, Convention => C, External_Name => "fy_parser_create";
+
+   procedure fy_parser_destroy (Fyp : Fy_Parser)
+     with Import, Convention => C, External_Name => "fy_parser_destroy";
+
+   function fy_parser_set_string
+     (Fyp : Fy_Parser; Str : CS.chars_ptr; Len : C.size_t) return C.int
+     with Import, Convention => C, External_Name => "fy_parser_set_string";
+
+   function fy_parser_set_input_file
+     (Fyp : Fy_Parser; File : CS.chars_ptr) return C.int
+     with Import, Convention => C, External_Name => "fy_parser_set_input_file";
+
+   function fy_parse_load_document (Fyp : Fy_Parser) return Fy_Document
+     with Import, Convention => C, External_Name => "fy_parse_load_document";
 
    procedure fy_document_destroy (Fyd : Fy_Document)
      with Import, Convention => C, External_Name => "fy_document_destroy";

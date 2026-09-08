@@ -3,6 +3,9 @@ lib/
 test/obj/
 test/test_quickstart
 test/test_sequence
+test/test_scalars
+test/test_navigate
+test/test_streams
 
 
 *~

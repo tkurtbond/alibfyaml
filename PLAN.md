@@ -314,7 +314,39 @@ indication of it.
 
 ## Multi-document YAML streams
 
-**Current gap, precisely:** `Libfyaml.Documents.Parse_String`/
+**[done]** Implemented as `Libfyaml.Documents.Streams.Document_Stream`
+(`src/libfyaml-documents-streams.ads/.adb`, a *child* package of
+`Libfyaml.Documents` — see "Design" below for why it has to be a child
+rather than living directly in `Libfyaml.Documents` alongside
+`Document`). Covered by `test/test_streams.adb`: reads all three
+documents from a file and from a string in order, confirms
+`Parse_File` still only ever sees the first document of the same file,
+confirms `Has_Next` stays `False` once exhausted, and confirms a
+malformed second document raises `Libfyaml.Parse_Error` rather than
+looking like a clean end of stream. Also re-verified directly against
+the real two-document composite file from the `besm2_fmt` session that
+first found this gap — both entities now read correctly.
+
+**A second real lifetime bug found implementing this, not by
+inspection:** `Open_File`'s first version freed its filename buffer
+right after `fy_parser_set_input_file` returned success, reasoning (by
+analogy with `fy_document_build_from_file`) that the filename wasn't
+retained beyond the call. Wrong — confirmed by the doc comment, which
+this reasoning had glossed over: "while the parser is in use the
+file[name] must be available." The file is evidently opened lazily,
+per `fy_parse_load_document` call, using the stored filename pointer —
+so freeing it right after setup was a use-after-free that only showed
+up as a mysterious `"[ERR]: failed to open <garbage>"` from libfyaml
+partway through iterating the stream, with the garbage differing
+between runs (freed/reused stack memory). A pure-C reproduction using
+a string *literal* filename didn't reproduce it at all (literals are
+never freed), which is exactly why it needed tracing rather than just
+"looks fine in C". Fixed the same way `Parse_String`'s buffer bug was:
+the stream (not any one document) owns and frees the buffer, now for
+*both* `Open_String`'s text and `Open_File`'s filename.
+
+**The gap, precisely (as found, before the fix above):**
+`Libfyaml.Documents.Parse_String`/
 `Parse_File` wrap `fy_document_build_from_string`/`_file`, which build
 and return exactly *one* `fy_document`. Given a file containing more
 than one `---`-separated YAML document, only the first is parsed;
@@ -333,16 +365,122 @@ a time, returning `NULL` once exhausted — which `alibfyaml` doesn't
 bind at all; only the single-document convenience functions are
 bound (see `src/libfyaml-thin.ads`).
 
-**Fix direction (not designed in detail yet):** bind `fy_parser_create`/
-`fy_parser_destroy`/`fy_parse_load_document`/`fy_parser_set_input_*`
-(or whichever subset the single-document path doesn't already need) in
-`Libfyaml.Thin`, and add something like a `Libfyaml.Documents.
-Document_Stream` type (or an iterator/callback over `Parse_String`/
-`Parse_File`) that yields each `Document` in turn, distinct from the
-current "parse exactly one document" `Parse_String`/`Parse_File` — those
-should probably keep their current single-document behavior/signature
-for callers who know their input is a single document, rather than
-changing what they mean.
+**Design, confirmed against libfyaml's own source (not just the
+headers):** libfyaml itself splits this the same way `Document`/
+`Document_Stream` now do —
+`fy_document_build_from_string`/`_file` build exactly one document;
+the streaming layer is `fy_parser_create` →
+`fy_parser_set_string`/`fy_parser_set_input_file` → repeated
+`fy_parse_load_document(fyp)` calls, `NULL` once exhausted →
+`fy_parser_destroy`. Confirmed this is genuinely the intended idiom,
+not just what `fy-tool` happens to do: libfyaml's own internals
+(`src/lib/fy-parse.c`) use `while ((fyd = fy_parse_load_document(fyp))
+!= NULL) { ... }` themselves.
+
+**`Libfyaml.Thin` additions** (all confirmed real `FY_EXPORT` symbols):
+
+```ada
+type Fy_Parser is new System.Address;
+Null_Fy_Parser : constant Fy_Parser := Fy_Parser (System.Null_Address);
+
+function fy_parser_create (Cfg : access constant Fy_Parse_Cfg) return Fy_Parser;
+procedure fy_parser_destroy (Fyp : Fy_Parser);
+function fy_parser_set_string (Fyp : Fy_Parser; Str : CS.chars_ptr; Len : C.size_t) return C.int;
+function fy_parser_set_input_file (Fyp : Fy_Parser; File : CS.chars_ptr) return C.int;
+function fy_parse_load_document (Fyp : Fy_Parser) return Fy_Document;
+```
+
+**`Libfyaml.Documents.Streams` (a child package, not the same package
+as `Document`) — what actually got built:**
+
+```ada
+type Document_Stream is tagged limited private;
+
+function Open_String (Text : String) return Document_Stream;
+function Open_File   (Path : String) return Document_Stream;
+
+function Has_Next (Stream : in out Document_Stream) return Boolean;
+function Next (Stream : in out Document_Stream) return Document
+  with Pre => Has_Next (Stream);
+```
+
+This differs from the original sketch in this plan in two ways, both
+forced by things the compiler caught (not just style preferences):
+
+- **A `Has_Next`/`Next` function pair, not an out-parameter procedure.**
+  The original idea — `procedure Next (Stream : in out Document_Stream;
+  Doc : out Document; Has_Document : out Boolean)` — doesn't compile:
+  `Document` is limited, and limited types have no assignment
+  operation at all, including inside a procedure body assigning to an
+  `out` parameter (`Doc := ...;` is illegal there just like anywhere
+  else) — only object *initialization* (a function's `return`,
+  build-in-place) is allowed for limited types. `Has_Next`/`Next` as
+  functions returning `Document` via ordinary `return` sidesteps this
+  entirely, at the cost of needing one-ahead read-ahead buffering
+  inside `Document_Stream` (a `Pending`/`Peeked` pair) since libfyaml's
+  own API has no side-effect-free way to "peek" the next document.
+
+- **A child package, not part of `Libfyaml.Documents` itself.** `Next`
+  needs both `Document_Stream` (parameter) and `Document` (result) in
+  its profile, and both are tagged types. Ada disallows a subprogram
+  from being a dispatching primitive of two different tagged types
+  declared in the same immediate scope — declaring `Document_Stream`
+  directly alongside `Document` hit exactly that restriction
+  ("operation can be dispatching in only one type"). Making
+  `Document_Stream` live in a *child* package instead resolves it:
+  `Document`, declared in the parent, isn't in this package's own
+  scope, so `Next` here is only ever a primitive of `Document_Stream`
+  — and a child package still has full visibility into its parent's
+  private part, so `Next` can construct a `Document` directly, exactly
+  the way `Libfyaml.Documents`' own `Parse_String`/`Parse_File` do
+  (their shared `Collected_Errors` helper moved from body-private to
+  the parent spec's private part so the child could reuse it too,
+  rather than duplicating that formatting logic).
+
+**`Document` itself does not change.** A `Document` produced by `Next`
+is the *same type*, wrapping the `Fy_Document` handle
+`fy_parse_load_document` returns, finalized by the existing `Finalize`
+that already calls `fy_document_destroy`. Checked whether
+stream-produced documents actually need the paired
+`fy_parse_document_destroy(fyp, fyd)` instead: its `fyp` parameter is
+marked `FY_UNUSED` in libfyaml's own implementation
+(`src/lib/fy-doc.c`), so plain `fy_document_destroy` is confirmed
+equivalent — no destroy-path branching needed. `Document_Stream` is
+purely an alternate constructor path; every existing `Document` method
+(`Root`, `To_YAML`, ...) works unchanged on a stream-yielded one.
+
+Two details needed to be right, both because of things this session
+already got wrong once on the single-document path — and one of them
+(the second) was gotten wrong *again* here too, the same class of bug
+in a new spot:
+
+1. **Buffer lifetime — for `Open_String`'s text *and*, it turned out,
+   `Open_File`'s filename.** `fy_parser_set_string`'s doc comment
+   carries the same warning `Parse_String`'s fix (above) was for:
+   "while the parser is active the string must not go out of scope."
+   Assumed by analogy that `Open_File`'s filename was safe to free
+   right after `fy_parser_set_input_file` returned success (like
+   `Parse_File` does) — wrong; see the bug writeup above the "gap"
+   section. Both buffers are owned and freed by `Document_Stream`
+   itself (an `Owned_Buffer` field, same shape as `Document`'s),
+   freed in `Finalize` *after* `fy_parser_destroy`, since either one
+   must outlive *every* document drawn from the stream, not just one.
+
+2. **A mid-stream parse error must not look like clean end-of-stream.**
+   `fy_parse_load_document` returning `NULL` is ambiguous on its own —
+   "no more documents" and "document 2 was malformed" look identical.
+   A shared private `Fetch` helper (used by both `Has_Next`'s
+   read-ahead and `Next`'s own direct fetch, so the two can't drift out
+   of sync on this) checks `fy_diag_got_error` whenever it sees `NULL`:
+   a collected error means raise `Libfyaml.Parse_Error` with the
+   collected diagnostic text (same as `Parse_String`/`Parse_File`
+   today); only a clean `NULL` with nothing collected means genuine
+   exhaustion.
+
+**Non-breaking, confirmed by construction:** `Parse_String`/
+`Parse_File` are untouched — same signature, same "exactly one
+document" meaning. `Document_Stream` is purely additive; existing
+callers who know their input is single-document see no change at all.
 
 ## Testing plan
 
@@ -400,15 +538,23 @@ additions to the existing `test/config.yaml`) covering:
   `Libfyaml.Resolve_Error` leaves the `Document` in a still-usable
   (just-unresolved) state or whether failure should be treated as fatal
   to that `Document`, matching how `Parse_Error` behaves today.
-- **Multi-document stream API shape**: the Multi-document YAML streams
-  section above names a fix direction but not a settled design — an
-  iterator type, a callback-based `Parse_All`, or something closer to
-  `fy_parse_load_document`'s own "call again for the next one, `NULL`
-  means done" shape are all plausible; needs a real design pass rather
-  than picking one here. Also unresolved: should `Parse_String`/
-  `Parse_File` at least start raising or logging when given input with
-  more than one document, given today's silent truncation, even before
-  a real multi-document API exists?
+- ~~**Multi-document stream API shape**~~ Resolved: `Document_Stream`
+  with an `out`-parameter `Next` (see the Multi-document YAML streams
+  section above) — mirrors `fy_parse_load_document`'s own "call again,
+  `NULL` means done" shape directly, and sidesteps needing new
+  machinery for `Document`'s limited/controlled-ness.
+- **Should `Parse_String`/`Parse_File` warn about extra documents?**
+  Now that `Document_Stream` exists as the correct tool for
+  multi-document input, should the single-document functions detect
+  "there's more after this document" and raise/log rather than
+  silently ignoring it (today's behavior, unchanged by adding
+  `Document_Stream` alongside them)? Detecting this needs one more
+  `fy_parse_load_document` call after the first to see if it returns
+  non-`NULL` — cheap, but changes `Parse_String`/`Parse_File` from
+  "parse one document" to "parse one document, but also read ahead" -
+  a real behavior/performance tradeoff, not just an obvious safety
+  win, so left as a follow-on decision rather than bundled into the
+  `Document_Stream` implementation.
 
 ## Non-breaking
 

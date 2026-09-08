@@ -42,12 +42,16 @@ It intentionally does **not** cover:
   a tree node (predicates, scalar/sequence/mapping access, path lookup).
 * `src/libfyaml-documents.ads/.adb` — `Document`: an RAII (controlled)
   owner of a parsed or freshly-built tree (parse, build, emit).
+* `src/libfyaml-documents-streams.ads/.adb` — `Document_Stream`: reads
+  multiple `---`-separated documents from one input in sequence (see
+  below); a child package of `Libfyaml.Documents`.
 * `test/` — built and run against a local libfyaml build as part of
   developing this binding: `test_quickstart.adb` (an Ada port of
   `examples/quick-start.c`), `test_sequence.adb`, `test_scalars.adb`
-  (exhaustive coverage of the typed scalar accessors below), and
+  (exhaustive coverage of the typed scalar accessors below),
   `test_navigate.adb` (a worked example of tree navigation, not a
-  pass/fail test).
+  pass/fail test), and `test_streams.adb` (multi-document streaming,
+  including a mid-stream parse error).
 
 ## Typed scalar accessors
 
@@ -83,6 +87,38 @@ beyond what YAML 1.2 core schema itself defines:
 
 Everything else — booleans, plain decimal/`0x`/`0o` integers, plain
 floats — follows YAML 1.2 core schema exactly, no extensions.
+
+## Multi-document YAML streams
+
+`Libfyaml.Documents.Parse_String`/`Parse_File` always parse exactly one
+document — given input with more than one `---`-separated document, they
+silently parse only the first. For input that may hold more than one
+document, use `Libfyaml.Documents.Streams.Document_Stream` instead:
+
+```ada
+declare
+   Stream : Libfyaml.Documents.Streams.Document_Stream :=
+     Libfyaml.Documents.Streams.Open_File ("multi.yaml");
+begin
+   while Libfyaml.Documents.Streams.Has_Next (Stream) loop
+      declare
+         Doc : Libfyaml.Documents.Document :=
+           Libfyaml.Documents.Streams.Next (Stream);
+      begin
+         --  use Doc.Root, etc., same as a Parse_File-produced Document
+         null;
+      end;
+   end loop;
+end;
+```
+
+`Open_String`/`Open_File` build on libfyaml's separate streaming-parser
+API (`fy_parser_create` + repeated `fy_parse_load_document`) rather than
+the single-document `fy_document_build_from_string`/`_file` that
+`Parse_String`/`Parse_File` use. A malformed document partway through the
+stream raises `Libfyaml.Parse_Error`, distinct from `Has_Next` returning
+`False` at a clean end of stream. See `PLAN.md` for the full design,
+including two lifetime bugs found and fixed while implementing this.
 
 ## Building
 

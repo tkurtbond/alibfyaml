@@ -1,0 +1,83 @@
+--  Libfyaml.Documents.Streams - multi-document YAML streaming, built
+--  on libfyaml's separate streaming-parser API (fy_parser_create +
+--  repeated fy_parse_load_document calls) rather than the
+--  single-document fy_document_build_from_string/_file that
+--  Libfyaml.Documents.Parse_String/Parse_File use. Those always mean
+--  "parse exactly one document" and are unaffected by this package;
+--  use this one instead for input that may hold more than one
+--  "---"-separated document.
+--
+--  A child package, not part of Libfyaml.Documents itself: Ada
+--  disallows a subprogram from being a dispatching primitive of two
+--  different tagged types declared in the same immediate scope, and
+--  Next below needs both Document_Stream (a parameter) and Document
+--  (a result) in its profile. Document is declared in the parent,
+--  Document_Stream here, so Next is only ever a primitive of
+--  Document_Stream -- and being a child, this package still has full
+--  visibility of Document's private representation, so Next can build
+--  one directly, exactly the way Libfyaml.Documents' own Parse_String/
+--  Parse_File do.
+
+with Ada.Finalization;
+with Interfaces.C.Strings;
+with Libfyaml.Thin;
+
+package Libfyaml.Documents.Streams is
+
+   type Document_Stream is tagged limited private;
+
+   function Open_String (Text : String) return Document_Stream;
+   --  Open Text for streaming; use Has_Next/Next to read documents
+   --  from it. Raises Libfyaml.Parse_Error if the parser itself can't
+   --  be set up (this is about the *parser*, not any one document --
+   --  a syntax error in the first document surfaces from Next/Has_Next,
+   --  not here).
+
+   function Open_File (Path : String) return Document_Stream;
+   --  Open the file at Path for streaming; use Has_Next/Next to read
+   --  documents from it. Raises Libfyaml.Parse_Error if the file can't
+   --  be opened.
+
+   function Has_Next (Stream : in out Document_Stream) return Boolean;
+   --  True if there is at least one more document to read. "in out"
+   --  because there is no side-effect-free way to peek libfyaml's
+   --  stream: this may actually read the next document ahead of time,
+   --  caching it for Next. May raise Libfyaml.Parse_Error itself, if
+   --  that read-ahead is what encounters a malformed document.
+
+   function Next (Stream : in out Document_Stream) return Document
+     with Pre => Has_Next (Stream);
+   --  Consume and return the next document -- the one Has_Next found,
+   --  if it was called first; Next performs its own fetch otherwise
+   --  (the precondition is a usage contract, not something Next's
+   --  correctness depends on). Raises Libfyaml.Parse_Error if that
+   --  document fails to parse -- distinct from Has_Next returning
+   --  False (clean end of stream): a parse error partway through the
+   --  stream is not silently treated as "no more documents".
+
+private
+
+   type Document_Stream is new Ada.Finalization.Limited_Controlled with record
+      Handle       : Thin.Fy_Parser := Thin.Null_Fy_Parser;
+      Diag         : Thin.Fy_Diag := Thin.Null_Fy_Diag;
+      --  Kept alive for the whole stream (unlike Libfyaml.Documents'
+      --  own Parse_Common, which creates and destroys a Diag per
+      --  single-document call): Has_Next/Next need it after every
+      --  fy_parse_load_document call, to tell a clean end of stream
+      --  apart from a parse error -- both return NULL from libfyaml.
+      Owned_Buffer : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.Null_Ptr;
+      --  Set by Open_String (the text) or Open_File (the filename) --
+      --  both must stay alive for as long as the parser is in use.
+      --  Same reasoning as Document's own Owned_Buffer, except here
+      --  it must outlive every Document drawn from the stream, not
+      --  just one, so it belongs to the stream rather than to any
+      --  single Document.
+      Pending      : Thin.Fy_Document := Thin.Null_Fy_Document;
+      Peeked       : Boolean := False;
+      --  Has_Next's one-ahead read-ahead cache, consumed by Next.
+   end record;
+
+   overriding procedure Finalize (Stream : in out Document_Stream);
+
+end Libfyaml.Documents.Streams;

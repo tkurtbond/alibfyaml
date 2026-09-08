@@ -28,6 +28,13 @@ package Libfyaml.Documents is
    --  Parse the file at Path as a standalone YAML/JSON document.
    --  Raises Libfyaml.Parse_Error if the file cannot be read or parsed.
 
+   --  Note: Parse_String/Parse_File always mean "parse exactly one
+   --  document" -- given input with more than one "---"-separated
+   --  document, they silently parse only the first (this is what the
+   --  underlying fy_document_build_from_string/_file do). For input
+   --  that may hold more than one document, see the child package
+   --  Libfyaml.Documents.Streams.
+
    -----------------------
    --  Tree access/build --
    -----------------------
@@ -87,5 +94,11 @@ private
    end record;
 
    overriding procedure Finalize (Doc : in out Document);
+
+   function Collected_Errors (Diag : Thin.Fy_Diag) return String;
+   --  Format Diag's collected errors as "file:line:col: message" lines.
+   --  Declared here (not just in the body) so the child package
+   --  Libfyaml.Documents.Streams can reuse it instead of duplicating
+   --  the same formatting logic.
 
 end Libfyaml.Documents;

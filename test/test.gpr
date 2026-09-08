@@ -8,7 +8,7 @@ project Test is
    for Exec_Dir use ".";
    for Main use
      ("test_quickstart.adb", "test_sequence.adb", "test_scalars.adb",
-      "test_navigate.adb");
+      "test_navigate.adb", "test_streams.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use ("-gnat2012", "-gnatwa", "-g");
