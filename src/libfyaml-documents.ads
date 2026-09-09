@@ -134,17 +134,71 @@ package Libfyaml.Documents is
 
 private
 
+   type Buffer_Cell is record
+      Count : Natural;
+      Text  : Interfaces.C.Strings.chars_ptr;
+   end record;
+
+   type Buffer_Cell_Access is access Buffer_Cell;
+
+   type Buffer_Ref is new Ada.Finalization.Controlled with record
+      Cell : Buffer_Cell_Access := null;
+   end record;
+   --  A reference-counted handle to an Interfaces.C.Strings.chars_ptr
+   --  buffer that can be shared by more than one owner -- currently
+   --  Document and Document_Stream (see each type's own Owned_Buffer
+   --  component). Adjust/Finalize below do the refcounting: Cell.Text
+   --  is freed only once the *last* Buffer_Ref referencing it is
+   --  gone, regardless of which owner (or how many) goes out of
+   --  scope first.
+   --
+   --  Needed because Document_Stream.Open_String's buffer backs
+   --  every Document drawn from that stream via Next, not just the
+   --  stream itself (fy_parser_set_string doesn't copy its input,
+   --  same as fy_document_build_from_string) -- confirmed live with
+   --  valgrind that destroying the stream while such a Document was
+   --  still in use was a genuine use-after-free before this existed:
+   --  the buffer was solely owned by the stream, freed unconditionally
+   --  in its Finalize, with no regard for any Document still holding
+   --  a zero-copy span into it. (Document_Stream.Open_File has no
+   --  equivalent hazard -- confirmed live separately -- so its
+   --  Owned_Buffer, though also a Buffer_Ref for uniformity, is never
+   --  actually shared with a Document; only Open_String's is.)
+
+   overriding procedure Adjust (Buf : in out Buffer_Ref);
+   overriding procedure Finalize (Buf : in out Buffer_Ref);
+
+   function Make_Buffer_Ref
+     (Text : Interfaces.C.Strings.chars_ptr) return Buffer_Ref;
+   --  Wraps Text in a fresh Buffer_Ref with a reference count of one,
+   --  taking ownership of it: Text must not be freed by the caller
+   --  afterward, and the returned Buffer_Ref (or a copy of it) must
+   --  be held by something for Text to stay alive -- Finalize frees
+   --  it once the last reference is gone.
+   --  Declared here (not just in the body), like Collected_Errors
+   --  below, so the child package Libfyaml.Documents.Streams can
+   --  reuse it for Document_Stream's own Owned_Buffer instead of
+   --  duplicating the refcounting logic.
+
    type Document is new Ada.Finalization.Limited_Controlled with record
       Handle       : Thin.Fy_Document := Thin.Null_Fy_Document;
-      Owned_Buffer : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.Null_Ptr;
-      --  Only set by Parse_String: fy_document_build_from_string does not
-      --  copy its input (libfyaml is zero-copy in its core parsing
-      --  paths), so the source buffer must outlive the document. Freed
-      --  in Finalize.
+      Owned_Buffer : Buffer_Ref;
+      --  Set by Parse_String directly (via Make_Buffer_Ref, a fresh
+      --  count of one), or by Document_Stream.Next as a shared copy
+      --  of the stream's own Owned_Buffer when that stream was
+      --  opened via Open_String (see Buffer_Ref above for why that
+      --  sharing is necessary). Left at its default (no Cell,
+      --  nothing to free) for Parse_File and for a Document drawn
+      --  from an Open_File-based stream -- neither references any
+      --  buffer this binding itself owns.
    end record;
 
    overriding procedure Finalize (Doc : in out Document);
+   --  Owned_Buffer is NOT freed here directly: it is a controlled
+   --  component (Buffer_Ref), so the language finalizes it
+   --  automatically right after this procedure body completes,
+   --  decrementing its reference count and freeing the underlying
+   --  text only if that was the last reference.
 
    function Collected_Errors
      (Diag : Thin.Fy_Diag; File_Override : String := "") return String;

@@ -93,9 +93,30 @@
     (zero-copy construction) as an option alongside Create_Scalar,
     with clear Ada-side ownership/lifetime documentation, for callers
     who want to avoid the copy? Still open.
-  - Document the general rule for binding consumers: which Node-
-    returning accessors hand back data whose lifetime is tied to the
-    Document's input buffer vs. document-owned storage. Still open.
+  - RESOLVED: Document the general rule for binding consumers: which
+    Node-returning accessors hand back data whose lifetime is tied to
+    the Document's input buffer vs. document-owned storage.
+
+    The answer, once actually investigated rather than just written
+    up from what seemed true: there isn't a per-accessor rule a
+    caller needs to track. Every Node is valid for exactly as long as
+    its Document is, full stop, regardless of which of Parse_String/
+    Parse_File/Document_Stream.Open_String/Open_File produced it --
+    see the extended header comment in src/libfyaml-nodes.ads.
+
+    Investigating this specific claim (not by inspection -- by
+    actually checking the one case it implied and nothing tested)
+    found it was FALSE for one case: a Document drawn from
+    Document_Stream.Next, from a stream opened via Open_String,
+    shared its buffer with the *stream* rather than owning a
+    reference itself -- destroying the stream while such a Document
+    was still alive was a genuine, silent use-after-free (confirmed
+    live with valgrind). Fixed with a small reference-counted buffer
+    handle (Buffer_Ref) shared between the stream and every Document
+    drawn from it -- see PLAN.md's "Document_Stream buffer lifetime"
+    section for the full writeup and src/libfyaml-documents.ads for
+    Buffer_Ref itself. The rule as now documented is true because
+    this fix makes it true, not because it always was.
 * TODO Can alibfyaml be extended to read from existing Ada File_Type variables, like Current_Input and Standard_Input?
 How does that work with libfyaml's zero copy?
 * CANCELLED Resolve YAML 1.1 language-independent types: timestamp, binary, merge, omap, pairs, set

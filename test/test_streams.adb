@@ -31,6 +31,20 @@ procedure Test_Streams is
       end if;
    end Check;
 
+   --  A Document drawn from an Open_String-based stream, outliving
+   --  that stream: the stream (and its Owned_Buffer) is finalized
+   --  when this function returns, before the caller ever touches the
+   --  returned Document -- confirmed live with valgrind, before the
+   --  fix this file's own use motivated, that reading it afterward
+   --  was a genuine use-after-free (the Document's scalars are a
+   --  zero-copy span directly into the stream's buffer). See
+   --  Buffer_Ref in Libfyaml.Documents.
+   function Doc_Outliving_Its_Stream return Doc.Document is
+      Stream : Streams.Document_Stream := Streams.Open_String ("name: widget");
+   begin
+      return Streams.Next (Stream);
+   end Doc_Outliving_Its_Stream;
+
 begin
    -----------------------------------------------------------------
    --  Parse_File only ever sees the first document of streams.yaml.
@@ -205,6 +219,19 @@ begin
            ("FAIL - bad-stream case raised " & Ada.Exceptions.Exception_Name (E) &
             " outside the expected place");
          Failures := Failures + 1;
+   end;
+
+   -----------------------------------------------------------------
+   --  A Document drawn from Open_String must remain correctly
+   --  readable after the Document_Stream it came from is destroyed
+   --  -- see Doc_Outliving_Its_Stream's own comment above.
+   -----------------------------------------------------------------
+   declare
+      D : constant Doc.Document := Doc_Outliving_Its_Stream;
+   begin
+      Check ("a Document drawn from Open_String reads correctly " &
+             "after its Document_Stream is destroyed",
+             D.Root.String_Value ("name") = "widget");
    end;
 
    Ada.Text_IO.New_Line;

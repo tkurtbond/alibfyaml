@@ -19,7 +19,6 @@
 --  Parse_File do.
 
 with Ada.Finalization;
-with Interfaces.C.Strings;
 with Libfyaml.Thin;
 
 package Libfyaml.Documents.Streams is
@@ -77,14 +76,20 @@ private
       --  single-document call): Has_Next/Next need it after every
       --  fy_parse_load_document call, to tell a clean end of stream
       --  apart from a parse error -- both return NULL from libfyaml.
-      Owned_Buffer : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.Null_Ptr;
+      Owned_Buffer : Buffer_Ref;
       --  Set by Open_String (the text) or Open_File (the filename) --
       --  both must stay alive for as long as the parser is in use.
-      --  Same reasoning as Document's own Owned_Buffer, except here
-      --  it must outlive every Document drawn from the stream, not
-      --  just one, so it belongs to the stream rather than to any
-      --  single Document.
+      --  A Buffer_Ref (see Libfyaml.Documents), not a plain
+      --  chars_ptr, specifically for the Open_String case: Next
+      --  gives every Document drawn from such a stream its own copy
+      --  of this same Buffer_Ref (see Next below), since the
+      --  underlying text backs their scalars too, not just the
+      --  stream's own parsing -- confirmed live with valgrind that a
+      --  Document outliving the stream it came from was a genuine
+      --  use-after-free before this existed. Open_File's Owned_Buffer
+      --  (the filename) is never actually shared with a Document --
+      --  confirmed live separately that no such hazard exists there
+      --  -- but uses the same type for uniformity.
       Pending      : Thin.Fy_Document := Thin.Null_Fy_Document;
       Peeked       : Boolean := False;
       --  Has_Next's one-ahead read-ahead cache, consumed by Next.

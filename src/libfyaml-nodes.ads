@@ -8,6 +8,34 @@
 --  by explicit construction (Libfyaml.Documents.Create_Scalar / _Sequence /
 --  _Mapping), and are attached into the tree with Append / Append_Pair /
 --  Libfyaml.Documents.Set_Root / Insert_At.
+--
+--  That one rule ("valid as long as its Document is") is the whole
+--  lifetime contract a caller needs -- deliberately, not as a
+--  simplification that glosses over something. libfyaml's core layer
+--  is zero-copy wherever it can be: a Scalar_Value/Tag reading back a
+--  plain (unquoted, unescaped) scalar or a raw tag is a `const char *`
+--  + length span directly into whatever buffer holds the original
+--  source text, not a copy -- for a scalar built from an escaped or
+--  quoted source, or a block scalar, libfyaml does copy, since the
+--  decoded value can't be represented as a plain span of the source
+--  bytes (see Libfyaml.Documents.Create_Scalar's own doc comment for
+--  the analogous copying-vs-not distinction at construction time).
+--  Rather than expose that copied-or-not distinction to callers as
+--  something they need to reason about per accessor, this binding
+--  keeps every input buffer a Node's data might reference alive for
+--  exactly as long as any Document could still need it -- regardless
+--  of which of Parse_String, Parse_File, Libfyaml.Documents.Streams.
+--  Document_Stream.Open_String, or ...Open_File produced that
+--  Document. Confirmed live (and fixed) that this used to fail in one
+--  specific case: a Document drawn from Document_Stream.Next, from a
+--  stream opened via Open_String, shared its scalars' backing buffer
+--  with the *stream* rather than owning a reference to it itself --
+--  destroying the stream while such a Document was still in use was
+--  a genuine (silent, no crash) use-after-free. Fixed by giving the
+--  buffer a small reference count (Buffer_Ref, in Libfyaml.Documents'
+--  private part) shared between the stream and every Document drawn
+--  from it, freed only once the last holder is gone -- see PLAN.md's
+--  "Document_Stream buffer lifetime" section for the full writeup.
 
 with Libfyaml.Thin;
 

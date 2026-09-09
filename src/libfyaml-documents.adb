@@ -1,5 +1,6 @@
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Unchecked_Deallocation;
 with System;
 
 package body Libfyaml.Documents is
@@ -9,6 +10,38 @@ package body Libfyaml.Documents is
    use type CS.chars_ptr;
    use type Thin.Fy_Document;
    use type Thin.Fy_Diag_Error_Access;
+
+   procedure Free_Cell is new Ada.Unchecked_Deallocation
+     (Buffer_Cell, Buffer_Cell_Access);
+
+   overriding procedure Adjust (Buf : in out Buffer_Ref) is
+   begin
+      if Buf.Cell /= null then
+         Buf.Cell.Count := Buf.Cell.Count + 1;
+      end if;
+   end Adjust;
+
+   overriding procedure Finalize (Buf : in out Buffer_Ref) is
+   begin
+      if Buf.Cell /= null then
+         Buf.Cell.Count := Buf.Cell.Count - 1;
+         if Buf.Cell.Count = 0 then
+            if Buf.Cell.Text /= CS.Null_Ptr then
+               CS.Free (Buf.Cell.Text);
+            end if;
+            Free_Cell (Buf.Cell);
+         end if;
+         Buf.Cell := null;
+      end if;
+   end Finalize;
+
+   function Make_Buffer_Ref
+     (Text : CS.chars_ptr) return Buffer_Ref
+   is
+   begin
+      return (Ada.Finalization.Controlled with
+                Cell => new Buffer_Cell'(Count => 1, Text => Text));
+   end Make_Buffer_Ref;
 
    function Collected_Errors
      (Diag : Thin.Fy_Diag; File_Override : String := "") return String
@@ -122,7 +155,7 @@ package body Libfyaml.Documents is
         Parse_Common
           (Build'Access, Resolve_Flags (Resolve_Anchors), "(string-in-memory)")
       do
-         Result.Owned_Buffer := C_Text;
+         Result.Owned_Buffer := Make_Buffer_Ref (C_Text);
       end return;
    exception
       when others =>
@@ -242,9 +275,9 @@ package body Libfyaml.Documents is
          Thin.fy_document_destroy (Doc.Handle);
          Doc.Handle := Thin.Null_Fy_Document;
       end if;
-      if Doc.Owned_Buffer /= CS.Null_Ptr then
-         CS.Free (Doc.Owned_Buffer);
-      end if;
+      --  Doc.Owned_Buffer is a Buffer_Ref, a controlled component --
+      --  the language finalizes it automatically right after this
+      --  procedure body completes; see its own Finalize.
    end Finalize;
 
 end Libfyaml.Documents;

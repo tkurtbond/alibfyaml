@@ -582,6 +582,81 @@ No test asserted the old exact message text (only that it was
 non-empty), so this is a pure formatting improvement, not a breaking
 change to anything in this repo.
 
+## Document_Stream buffer lifetime -- a Document could outlive its Stream (fixed)
+
+**[done]** Found while writing the "which Node-returning accessors
+hand back buffer-tied data" documentation this section itself
+answers (000-todo.org's zero-copy-analysis item) -- not by
+inspection, but by actually checking the one case that question
+implied and no existing test covered: does a `Document` drawn from
+`Document_Stream.Next` remain correctly readable after the
+`Document_Stream` itself is destroyed?
+
+**Confirmed live: no, for `Open_String`.** `Document_Stream`'s
+`Owned_Buffer` (the parsed text) was solely owned by the stream,
+freed unconditionally in the stream's own `Finalize` -- with no
+regard for whether a `Document` drawn from it (via `Next`) was still
+alive and still holding a zero-copy span directly into that same
+buffer (`fy_parser_set_string`, like `fy_document_build_from_string`,
+doesn't copy its input). Destroying the stream while such a Document
+was still in use was a genuine use-after-free: no crash, just
+silently wrong data -- an empty string in one run, coincidentally
+correct-looking leftover bytes in another (same "confirmed live" bug
+class as the `Insert_At`/`Parse_String`/`Open_File`-filename findings
+earlier in this file). `Open_File`-based streams have no equivalent
+hazard -- confirmed separately, live: each document's own content is
+independently backed, not shared with the stream's (much smaller)
+owned buffer, which is only ever the *filename*.
+
+**Fix:** a small reference-counted handle, `Buffer_Ref` (declared in
+`Libfyaml.Documents`'s private part, alongside `Collected_Errors`, for
+the same reason -- so the child package can reuse it), wraps the
+`chars_ptr` buffer. `Document.Owned_Buffer` and
+`Document_Stream.Owned_Buffer` are both `Buffer_Ref` now (previously
+a plain `chars_ptr` on each). `Adjust`/`Finalize` do the refcounting:
+the underlying text is freed only once the *last* `Buffer_Ref`
+referencing it is finalized, regardless of which owner -- the stream,
+or any number of `Document`s drawn from it -- goes out of scope
+first. `Document_Stream.Next` gives every `Document` it returns a
+shared copy of the stream's own `Owned_Buffer` when the stream was
+opened via `Open_String` (and none, as before, when opened via
+`Open_File`, since no sharing is needed there).
+
+This was a deliberate design choice among two real options put to
+the project owner rather than decided silently: fix it with shared
+ownership (chosen), or leave it as a documented hard constraint ("a
+Document from Open_String must not outlive its Stream") enforced by
+nothing but the doc comment. The constraint-only option was cheaper
+but left a real, silent-wrong-data footgun with no loud failure mode
+-- not an acceptable tradeoff once framed that way.
+
+**Confirmed live with valgrind, both orderings:** a `Document` drawn
+from `Open_String` and returned from a function (so the stream is
+destroyed before the caller ever touches the Document) now reads
+back correctly, 0 errors, all heap blocks freed. The far more common
+ordering -- every Document finalized before its stream, as every
+pre-existing `test_streams.adb` check already does -- remains
+unaffected and still leak-free (459 allocs, 459 frees). Covered
+permanently by a new check in `test_streams.adb`
+(`Doc_Outliving_Its_Stream`).
+
+**The answer to the original "general lifetime rule" question, now
+that this is fixed:** there isn't a per-accessor rule a caller needs
+to track. Every `Node`'s data is valid for exactly as long as its
+`Document` is (the one rule already stated in `Libfyaml.Nodes`'s own
+header comment) -- regardless of whether that `Document` came from
+`Parse_String`, `Parse_File`, `Open_String`, or `Open_File`. That
+uniformity is the deliverable, not a list of which specific
+functions happen to be buffer-backed internally; see the extended
+header comment in `src/libfyaml-nodes.ads` for the write-up aimed at
+a binding consumer, not just this file's own development history.
+
+**Still open, separately:** whether to expose the non-copying
+`fy_node_create_scalar` alongside `Create_Scalar`. That is a genuinely
+different question -- an *opt-in* zero-copy construction API, where
+the caller (not this binding) would own the lifetime obligation --
+not something this fix resolves or is blocked on.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or

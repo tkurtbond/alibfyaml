@@ -1,4 +1,5 @@
 with Interfaces.C;
+with Interfaces.C.Strings;
 with System;
 
 package body Libfyaml.Documents.Streams is
@@ -7,7 +8,6 @@ package body Libfyaml.Documents.Streams is
    package CS renames Interfaces.C.Strings;
 
    use type C.int;
-   use type CS.chars_ptr;
    use type Thin.Fy_Document;
    use type Thin.Fy_Diag;
    use type Thin.Fy_Parser;
@@ -38,9 +38,12 @@ package body Libfyaml.Documents.Streams is
       --  fy_parser_set_string doesn't copy its input, and it must stay
       --  alive for as long as the parser is (i.e. for every document
       --  drawn from it, not just one) -- see Owned_Buffer in the spec.
+      --  Ownership transfers to a fresh Buffer_Ref, count one; Next
+      --  gives each Document drawn from this stream a shared copy.
       return Document_Stream'
         (Ada.Finalization.Limited_Controlled with
-           Handle => Fyp, Diag => Diag, Owned_Buffer => C_Text,
+           Handle => Fyp, Diag => Diag,
+           Owned_Buffer => Libfyaml.Documents.Make_Buffer_Ref (C_Text),
            Pending => Thin.Null_Fy_Document, Peeked => False,
            From_String => True);
    end Open_String;
@@ -75,11 +78,15 @@ package body Libfyaml.Documents.Streams is
       --  hard way, by an actual use-after-free (the file is evidently
       --  opened lazily, per fy_parse_load_document call, using the
       --  filename pointer given here). C_Path is NOT freed: ownership
-      --  transfers to the stream (Owned_Buffer), freed in Finalize,
-      --  same as Open_String's text buffer above.
+      --  transfers to a fresh Buffer_Ref (Owned_Buffer), same as
+      --  Open_String's text buffer above -- though unlike that case,
+      --  no Document ever gets a copy of this one (see From_String
+      --  below), so this reference count never exceeds one in
+      --  practice.
       return Document_Stream'
         (Ada.Finalization.Limited_Controlled with
-           Handle => Fyp, Diag => Diag, Owned_Buffer => C_Path,
+           Handle => Fyp, Diag => Diag,
+           Owned_Buffer => Libfyaml.Documents.Make_Buffer_Ref (C_Path),
            Pending => Thin.Null_Fy_Document, Peeked => False,
            From_String => False);
    end Open_File;
@@ -177,8 +184,19 @@ package body Libfyaml.Documents.Streams is
          raise Program_Error with
            "Document_Stream.Next: no document available (check Has_Next first)";
       end if;
-      return Document'(Ada.Finalization.Limited_Controlled with
-                          Handle => Fyd, Owned_Buffer => <>);
+      --  A stream opened via Open_String backs every Document drawn
+      --  from it with the same zero-copy buffer (see Owned_Buffer's
+      --  own comment) -- share it here, rather than leaving the
+      --  returned Document with none, so it survives the stream
+      --  being destroyed first. An Open_File-based stream has no
+      --  such hazard (confirmed live), so its Documents get none.
+      if Stream.From_String then
+         return Document'(Ada.Finalization.Limited_Controlled with
+                             Handle => Fyd, Owned_Buffer => Stream.Owned_Buffer);
+      else
+         return Document'(Ada.Finalization.Limited_Controlled with
+                             Handle => Fyd, Owned_Buffer => <>);
+      end if;
    end Next;
 
    overriding procedure Finalize (Stream : in out Document_Stream) is
@@ -191,9 +209,11 @@ package body Libfyaml.Documents.Streams is
          Thin.fy_diag_destroy (Stream.Diag);
          Stream.Diag := Thin.Null_Fy_Diag;
       end if;
-      if Stream.Owned_Buffer /= CS.Null_Ptr then
-         CS.Free (Stream.Owned_Buffer);
-      end if;
+      --  Stream.Owned_Buffer is a Buffer_Ref, a controlled component
+      --  -- the language finalizes it automatically right after this
+      --  procedure body completes. If any Document drawn via Next
+      --  still holds a copy (Open_String case), the underlying text
+      --  isn't actually freed until that Document is finalized too.
    end Finalize;
 
 end Libfyaml.Documents.Streams;
