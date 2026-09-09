@@ -66,7 +66,7 @@
       unconditionally unrefs it, and frees it outright if the
       operation fails. Fixed: Insert_At's N parameter is now "in out"
       and is nulled out on failure. See its doc comment in
-      src/libfyaml-documents.ads and the fix's own note in REVIEW.md.
+      src/libfyaml-documents.ads.
   - Should alibfyaml expose the non-copying fy_node_create_scalar
     (zero-copy construction) as an option alongside Create_Scalar,
     with clear Ada-side ownership/lifetime documentation, for callers
