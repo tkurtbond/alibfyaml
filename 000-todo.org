@@ -59,3 +59,42 @@
     Document's input buffer vs. document-owned storage.
 * TODO Can alibfyaml be extended to read from existing Ada File_Type variables, like Current_Input and Standard_Input?
 How does that work with libfyaml's zero copy?
+* CANCELLED Resolve YAML 1.1 language-independent types: timestamp, binary, merge, omap, pairs, set
+  The typed-scalar accessors in Libfyaml.Nodes (Is_Integer/Is_Float/
+  Is_Boolean/Integer_Value/etc.) only resolve the YAML 1.2 core schema
+  (null, bool, int, float) -- see the doc comment above them. They
+  don't touch the YAML 1.1-era "language-independent types" tag
+  repository: !!timestamp, !!binary, !!merge (<<), !!omap, !!pairs,
+  !!set. Those were dropped from YAML 1.2's core schema and libfyaml's
+  core layer doesn't resolve them either, so this would be new
+  Ada-side resolution logic, following the same pattern as the
+  existing typed accessors (Is_X predicate + X_Value raising
+  Libfyaml.Data_Error on mismatch).
+
+  Decided not to pursue any of the six:
+
+  - !!merge, !!omap, !!pairs, !!set -- not interested; not useful
+    enough for this binding to justify the work.
+
+  - !!binary -- would decode base64 scalar text to raw bytes. Skipped
+    because it needs two new pieces of infrastructure this project
+    doesn't have yet rather than just a grammar check: a base64
+    decoder (nothing in the codebase decodes base64 today) and a
+    decision on what Ada type to hand the decoded bytes back as (no
+    existing "byte string" convention here -- candidates are
+    Ada.Streams.Stream_Element_Array, System.Storage_Elements.Storage_Array,
+    or a String used as a raw byte buffer). Not just another *_Value
+    function like Integer_Value/Float_Value.
+
+  - !!timestamp -- would parse the YAML 1.1 timestamp grammar (full
+    ISO 8601 forms, a space in place of T, a bare Z or +-hh[:mm]
+    offset, a date-only form). Skipped because the natural return
+    type, Ada.Calendar.Time, can't round-trip what the scalar actually
+    says: Ada.Calendar.Time is a UTC instant, so it silently discards
+    the source UTC offset (e.g. the "-05:00" in
+    "2001-12-14t21:59:43.10-05:00" is lost once folded to UTC) and its
+    sub-second precision is implementation-defined. Preserving the
+    as-written value faithfully would mean returning a custom record
+    (year/month/day/hour/minute/second/sub-second/UTC-offset) instead
+    of a single builtin Ada type -- again more design work than a
+    plain *_Value accessor.
