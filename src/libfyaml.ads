@@ -36,4 +36,8 @@ package Libfyaml is
    --  but cannot be resolved as the requested type (e.g. Integer_Value
    --  on a node holding "banana").
 
+   Resolve_Error : exception;
+   --  Raised by Libfyaml.Documents.Resolve when resolving anchors,
+   --  aliases, and merge keys fails (e.g. a merge-key cycle).
+
 end Libfyaml;

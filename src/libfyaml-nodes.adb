@@ -12,6 +12,7 @@ package body Libfyaml.Nodes is
    use type Thin.Fy_Node;
    use type Thin.Fy_Node_Pair;
    use type Thin.Fy_Node_Type;
+   use type Thin.Fy_Node_Style;
 
    ------------------------------------------------------------------
    --  YAML 1.2 core schema scalar-shape validation, private to     --
@@ -566,5 +567,18 @@ package body Libfyaml.Nodes is
       CS.Free (C_Path);
       return Wrap (Result);
    end By_Path;
+
+   function Is_Alias (N : Node) return Boolean is
+     (Is_Scalar (N) and then Thin.fy_node_get_style (N.Handle) = Thin.FYNS_ALIAS);
+
+   function Tag (N : Node) return String is
+      Len : aliased C.size_t;
+      Ptr : constant CS.chars_ptr := Thin.fy_node_get_tag (N.Handle, Len'Access);
+   begin
+      if Ptr = CS.Null_Ptr then
+         return "";
+      end if;
+      return CS.Value (Ptr, Len);
+   end Tag;
 
 end Libfyaml.Nodes;

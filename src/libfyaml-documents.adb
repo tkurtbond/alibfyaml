@@ -33,7 +33,8 @@ package body Libfyaml.Documents is
 
    function Parse_Common
      (Build : not null access function
-        (Cfg : access constant Thin.Fy_Parse_Cfg) return Thin.Fy_Document)
+        (Cfg : access constant Thin.Fy_Parse_Cfg) return Thin.Fy_Document;
+      Flags : C.unsigned := 0)
       return Document
    is
       Diag : constant Thin.Fy_Diag := Thin.fy_diag_create (System.Null_Address);
@@ -41,6 +42,7 @@ package body Libfyaml.Documents is
    begin
       Thin.fy_diag_set_collect_errors (Diag, C.C_bool (True));
       Cfg.Diag := Diag;
+      Cfg.Flags := Flags;
       declare
          Handle : constant Thin.Fy_Document := Build (Cfg'Access);
       begin
@@ -71,7 +73,12 @@ package body Libfyaml.Documents is
          raise;
    end Parse_Common;
 
-   function Parse_String (Text : String) return Document is
+   function Resolve_Flags (Resolve_Anchors : Boolean) return C.unsigned is
+     (if Resolve_Anchors then Thin.FYPCF_RESOLVE_DOCUMENT else 0);
+
+   function Parse_String
+     (Text : String; Resolve_Anchors : Boolean := True) return Document
+   is
       C_Text : CS.chars_ptr := CS.New_String (Text);
 
       function Build
@@ -83,7 +90,9 @@ package body Libfyaml.Documents is
       --  copy the input, so the resulting document's scalars can point
       --  directly into this buffer. Ownership transfers to the Document
       --  (see Owned_Buffer in the spec) and it's freed in Finalize.
-      return Result : Document := Parse_Common (Build'Access) do
+      return Result : Document :=
+        Parse_Common (Build'Access, Resolve_Flags (Resolve_Anchors))
+      do
          Result.Owned_Buffer := C_Text;
       end return;
    exception
@@ -92,7 +101,9 @@ package body Libfyaml.Documents is
          raise;
    end Parse_String;
 
-   function Parse_File (Path : String) return Document is
+   function Parse_File
+     (Path : String; Resolve_Anchors : Boolean := True) return Document
+   is
       C_Path : CS.chars_ptr := CS.New_String (Path);
 
       function Build
@@ -100,7 +111,9 @@ package body Libfyaml.Documents is
       is (Thin.fy_document_build_from_file (Cfg, C_Path));
 
    begin
-      return Result : constant Document := Parse_Common (Build'Access) do
+      return Result : constant Document :=
+        Parse_Common (Build'Access, Resolve_Flags (Resolve_Anchors))
+      do
          CS.Free (C_Path);
       end return;
    exception
@@ -108,6 +121,14 @@ package body Libfyaml.Documents is
          CS.Free (C_Path);
          raise;
    end Parse_File;
+
+   procedure Resolve (Doc : in out Document) is
+      Status : constant C.int := Thin.fy_document_resolve (Doc.Handle);
+   begin
+      if Status /= 0 then
+         raise Libfyaml.Resolve_Error with "fy_document_resolve failed";
+      end if;
+   end Resolve;
 
    function Root (Doc : Document) return Nodes.Node is
      (Nodes.Wrap (Thin.fy_document_root (Doc.Handle)));

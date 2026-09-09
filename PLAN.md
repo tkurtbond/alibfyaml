@@ -257,7 +257,48 @@ as an open question below rather than built now.
 
 ## Anchors, aliases, merge keys, and explicit tags
 
-**Current gap, precisely:** `Libfyaml.Documents.Parse_String`/
+**[done]** Implemented as described below, with two differences from
+the original plan:
+
+- **Only `fy_document_resolve`, `fy_node_get_style`, and
+  `fy_node_get_tag` got bound in `Libfyaml.Thin`**, not the full list
+  originally proposed (`fy_node_get_anchor`, `fy_anchor_get_text`,
+  `fy_anchor_node`, `fy_document_lookup_anchor`(+variants),
+  `fy_node_resolve_alias`, `fy_node_dereference`). Those three are
+  exactly what `Is_Alias`/`Tag`/`Resolve` below need; the rest would
+  support querying an anchor's *name* or dereferencing one alias at a
+  time without a whole-document `Resolve`, but nothing in the thick
+  API calls for that yet -- `Libfyaml.Thin`'s own header comment is
+  explicit that it mirrors "the core entry points actually bound",
+  not the full surface speculatively. Still open if a concrete need
+  shows up.
+- **`Resolve_Anchors` defaults to `True`**, deciding the open question
+  originally left below: no released consumers to break, and a
+  YAML-parsing library silently mis-decoding anchored input by
+  default is the worse surprise for a new caller.
+
+Covered by `test/test_anchors.adb`: both parse-time resolution
+(default `True`, and `False` followed by an explicit `Resolve`),
+`Is_Alias`/`Tag` on the raw unresolved tree, and `Resolve_Error` on a
+genuine failure (a merge-key reference loop, `test/anchors_cycle.yaml`).
+
+**One thing found while implementing this, not by inspection:**
+resolving a document with a self-referencing merge key (a genuine
+reference loop, not just a deeply-nested one) leaks a small, fixed
+amount of memory -- confirmed live with valgrind -- entirely inside
+libfyaml's own ref-loop-detection diagnostic path
+(`fy_document_resolve` -> `fy_check_ref_loop` -> its
+`fy_document_diag_report` call), against the libfyaml build linked
+here (package-labeled `0.8-9.fc44`, already exposing the 1.0-beta1
+API this binding targets). Parsing the same fixture without calling
+`Resolve`, and resolving every other fixture, are both confirmed
+leak-free -- only this exact failure path inside libfyaml itself
+leaks, so there is nothing to fix on the Ada side; noted here (and at
+the point of the test that triggers it) so a future valgrind run
+isn't mistaken for a new regression in this binding.
+
+**Current gap, precisely (as it stood before the fix above):**
+`Libfyaml.Documents.Parse_String`/
 `Parse_File` never set `FYPCF_RESOLVE_DOCUMENT`, and `alibfyaml` doesn't
 bind `fy_document_resolve()` at all. Concretely, this means an anchored
 node (`&foo ...`) parses and queries fine at its point of definition,
@@ -527,17 +568,21 @@ additions to the existing `test/config.yaml`) covering:
   original zone offset (see Timestamps section). Add a
   `Timestamp_With_Offset` record type later if a concrete need for the
   original offset shows up; not built in v1.
-- **`Resolve_Anchors` default value**: proposed `False` above to avoid a
-  silent behavior change for any existing caller, but there's a real
-  argument for defaulting to `True` instead — a YAML *library* silently
-  mis-decoding anchored input by default is arguably the worse surprise
-  for a new caller, and `alibfyaml` has no released consumers yet to
-  break. Needs a decision before implementing, not just a placeholder.
-- **Should `Resolve` failure be recoverable?** `fy_document_resolve`
-  returns -1 on error (e.g. a merge-key cycle); need to decide whether
-  `Libfyaml.Resolve_Error` leaves the `Document` in a still-usable
-  (just-unresolved) state or whether failure should be treated as fatal
-  to that `Document`, matching how `Parse_Error` behaves today.
+- ~~**`Resolve_Anchors` default value**~~ Resolved: `True`. No released
+  consumers to break, and a YAML *library* silently mis-decoding
+  anchored input by default is the worse surprise for a new caller.
+- ~~**Should `Resolve` failure be recoverable?**~~ Resolved:
+  still-usable, not fatal. `Resolve` only ever calls
+  `fy_document_resolve (Doc.Handle)` and raises on a nonzero status --
+  it never touches or invalidates `Doc.Handle` itself, so `Doc` stays
+  a normal, finalizable `Document` after a caught `Resolve_Error`
+  (confirmed live: `test_anchors.adb`'s reference-loop case does
+  exactly this, and valgrind shows no Ada-side issue from it, only the
+  libfyaml-internal leak noted above). What *is* unknown -- because
+  `fy_document_resolve`'s header doesn't document it -- is how much of
+  the tree got resolved before the error; `Doc`'s *content* should be
+  treated as unreliable after a caught `Resolve_Error` even though the
+  `Document` object itself remains safe to use and destroy normally.
 - ~~**Multi-document stream API shape**~~ Resolved: `Document_Stream`
   with an `out`-parameter `Next` (see the Multi-document YAML streams
   section above) — mirrors `fy_parse_load_document`'s own "call again,

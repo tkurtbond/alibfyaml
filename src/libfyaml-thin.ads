@@ -59,6 +59,30 @@ package Libfyaml.Thin is
    FYNWF_PTR_YAML     : constant C.unsigned := 0;
 
    -------------------------------------
+   --  fy_parse_cfg_flags (bitmask)   --
+   -------------------------------------
+
+   FYPCF_RESOLVE_DOCUMENT : constant C.unsigned := 2#0100#;
+   --  Bit 2: resolve anchors/aliases/merge keys while building a
+   --  document (see fy_document_resolve). Used by
+   --  Libfyaml.Documents.Parse_String/Parse_File's Resolve_Anchors
+   --  parameter.
+
+   -----------------------------
+   --  fy_node_style enum     --
+   -----------------------------
+
+   type Fy_Node_Style is
+     (FYNS_ANY, FYNS_FLOW, FYNS_BLOCK, FYNS_PLAIN, FYNS_SINGLE_QUOTED,
+      FYNS_DOUBLE_QUOTED, FYNS_LITERAL, FYNS_FOLDED, FYNS_ALIAS);
+   for Fy_Node_Style use
+     (FYNS_ANY => -1, FYNS_FLOW => 0, FYNS_BLOCK => 1, FYNS_PLAIN => 2,
+      FYNS_SINGLE_QUOTED => 3, FYNS_DOUBLE_QUOTED => 4, FYNS_LITERAL => 5,
+      FYNS_FOLDED => 6, FYNS_ALIAS => 7);
+   for Fy_Node_Style'Size use C.int'Size;
+   pragma Convention (C, Fy_Node_Style);
+
+   -------------------------------------
    --  fy_emitter_cfg_flags (bitmask) --
    -------------------------------------
 
@@ -191,6 +215,11 @@ package Libfyaml.Thin is
    function fy_document_get_diag (Fyd : Fy_Document) return Fy_Diag
      with Import, Convention => C, External_Name => "fy_document_get_diag";
 
+   function fy_document_resolve (Fyd : Fy_Document) return C.int
+     with Import, Convention => C, External_Name => "fy_document_resolve";
+   --  Resolves anchors, aliases, and merge keys in place: 0 on success,
+   --  -1 on error (e.g. a merge-key cycle).
+
    ---------------------
    --  Node predicates --
    ---------------------
@@ -206,6 +235,18 @@ package Libfyaml.Thin is
 
    function fy_node_is_null (Fyn : Fy_Node) return C.C_bool
      with Import, Convention => C, External_Name => "fy_node_is_null";
+
+   function fy_node_get_style (Fyn : Fy_Node) return Fy_Node_Style
+     with Import, Convention => C, External_Name => "fy_node_get_style";
+
+   --  fy_node_is_alias is likewise a "static inline" convenience wrapper
+   --  (fy_node_get_type(fyn) == FYNT_SCALAR && fy_node_get_style(fyn) ==
+   --  FYNS_ALIAS), not an exported symbol; Libfyaml.Nodes.Is_Alias
+   --  reimplements it the same way as Is_Scalar/Is_Sequence/Is_Mapping.
+
+   function fy_node_get_tag
+     (Fyn : Fy_Node; Lenp : access C.size_t) return CS.chars_ptr
+     with Import, Convention => C, External_Name => "fy_node_get_tag";
 
    ------------------------
    --  Scalar node access --

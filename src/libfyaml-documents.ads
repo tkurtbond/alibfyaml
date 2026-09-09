@@ -20,13 +20,29 @@ package Libfyaml.Documents is
    --  Parse --
    -----------
 
-   function Parse_String (Text : String) return Document;
+   function Parse_String
+     (Text : String; Resolve_Anchors : Boolean := True) return Document;
    --  Parse Text as a standalone YAML/JSON document.
    --  Raises Libfyaml.Parse_Error on a syntax error.
+   --
+   --  Resolve_Anchors controls whether anchors (&foo), aliases (*foo),
+   --  and merge keys (<<: *foo) are resolved as part of parsing (sets
+   --  FYPCF_RESOLVE_DOCUMENT; see fy_document_resolve). Left
+   --  unresolved, an alias node reads back via Scalar_Value as its own
+   --  anchor-name text (e.g. "foo"), not the referenced content, and a
+   --  merge key just leaves a literal "<<" key in the mapping instead
+   --  of the merged-in pairs -- both silently, with no error. Defaults
+   --  to True: alibfyaml has no released consumers to break, and a
+   --  YAML-parsing library silently mis-decoding anchored input by
+   --  default is the worse surprise for a new caller. Pass False to
+   --  see the raw, unresolved tree instead (e.g. to inspect anchors/
+   --  aliases themselves via Libfyaml.Nodes.Is_Alias/Tag), or resolve
+   --  it explicitly afterward via Resolve below.
 
-   function Parse_File (Path : String) return Document;
-   --  Parse the file at Path as a standalone YAML/JSON document.
-   --  Raises Libfyaml.Parse_Error if the file cannot be read or parsed.
+   function Parse_File
+     (Path : String; Resolve_Anchors : Boolean := True) return Document;
+   --  As Parse_String, but reading from the file at Path. Raises
+   --  Libfyaml.Parse_Error if the file cannot be read or parsed.
 
    --  Note: Parse_String/Parse_File always mean "parse exactly one
    --  document" -- given input with more than one "---"-separated
@@ -34,6 +50,18 @@ package Libfyaml.Documents is
    --  underlying fy_document_build_from_string/_file do). For input
    --  that may hold more than one document, see the child package
    --  Libfyaml.Documents.Streams.
+
+   procedure Resolve (Doc : in out Document);
+   --  Resolve anchors, aliases, and merge keys in Doc in place (wraps
+   --  fy_document_resolve) -- the same resolution Parse_String/
+   --  Parse_File perform automatically when Resolve_Anchors is True,
+   --  but usable on a document built programmatically (Create_*/
+   --  Set_Root) or parsed with Resolve_Anchors => False. Raises
+   --  Libfyaml.Resolve_Error on failure (e.g. a merge-key cycle); its
+   --  header doesn't document what state Doc is left in on failure
+   --  (partial resolution is possible), so treat Doc as unreliable
+   --  afterward rather than assuming either full resolution or a
+   --  clean rollback.
 
    -----------------------
    --  Tree access/build --

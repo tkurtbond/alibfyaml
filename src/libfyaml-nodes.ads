@@ -217,6 +217,29 @@ package Libfyaml.Nodes is
    --  Look up a descendant node by libfyaml's native path syntax, e.g.
    --  "/server/port". Returns Null_Node if the path cannot be resolved.
 
+   -----------------------------------
+   --  Anchors, aliases, and tags   --
+   -----------------------------------
+
+   function Is_Alias (N : Node) return Boolean
+     with Pre => Is_Valid (N);
+   --  True if N is an unresolved alias reference (*foo): a scalar-typed
+   --  node whose style is FYNS_ALIAS, per libfyaml's own
+   --  fy_node_is_alias (a "static inline" C header wrapper around
+   --  fy_node_get_type/fy_node_get_style, not an exported symbol --
+   --  reimplemented here the same way as Is_Scalar/Is_Sequence/
+   --  Is_Mapping). Calling Scalar_Value on such a node returns the
+   --  alias's own anchor-name text (e.g. "foo"), not the referenced
+   --  content -- resolve it first, via the Resolve_Anchors parameter
+   --  on Libfyaml.Documents.Parse_String/Parse_File or an explicit
+   --  Libfyaml.Documents.Resolve call, to get the referenced content
+   --  in its place instead.
+
+   function Tag (N : Node) return String
+     with Pre => Is_Valid (N);
+   --  N's raw explicit YAML tag text (e.g. "tag:yaml.org,2002:str", or
+   --  a custom "!mytag"), or "" if N has no explicit tag.
+
    ----------------------------------------------------------
    --  Binding-internal: bridges to/from the Thin C handle. --
    --  Used by Libfyaml.Documents; not needed by ordinary   --
