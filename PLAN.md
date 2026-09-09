@@ -657,6 +657,42 @@ different question -- an *opt-in* zero-copy construction API, where
 the caller (not this binding) would own the lifetime obligation --
 not something this fix resolves or is blocked on.
 
+## Zero-copy Create_Scalar -- decided not to pursue
+
+**[decided]** Analyzed as the follow-up to the buffer-lifetime fix
+above. `fy_node_create_scalar` (no-copy) vs. the already-bound
+`fy_node_create_scalar_copy` differ only in whether libfyaml makes
+its *own* internal copy of the scalar bytes. Either way, `Create_Scalar`
+still has to turn the caller's Ada `String` into a heap C buffer first
+(`CS.New_String`) -- Ada strings aren't null-terminated and are often
+stack-allocated, so that first copy isn't avoidable from this binding.
+The only thing a no-copy variant would save is libfyaml's *second*,
+internal copy.
+
+That saving is real but small, and every existing call site
+(`test_mutate.adb`, `test_quickstart.adb`, `test_location.adb`) builds
+a handful of scalars per document as one-off tree edits, not in a hot
+loop -- there's no concrete workload here where one extra short-string
+memcpy matters.
+
+Against that: making the no-copy variant safe requires new
+infrastructure `Document` doesn't have. The single `Owned_Buffer`
+(`Buffer_Ref`) added above covers exactly one buffer (the parse
+input); a zero-copy `Create_Scalar` would need `Document` to hold a
+growable collection of `Buffer_Ref`s, one per zero-copy scalar ever
+created on it, kept alive for the document's whole lifetime (no
+libfyaml callback exists to signal "this node was removed/replaced,
+its buffer can be freed now") -- real new complexity for a saving
+nothing here needs yet.
+
+Decided not to build it, following the same "no concrete need yet"
+reasoning as the deliberately-not-built items under source-location
+in `000-todo.org`, and the YAML-1.1-types cancellation. `Create_Scalar`
+stays copy-only. Revisit only if a real caller shows up with a
+scalar-construction workload where the extra copy is measurably
+costly -- at which point the growable-`Buffer_Ref`-list design above
+is the starting point, not open design space.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or

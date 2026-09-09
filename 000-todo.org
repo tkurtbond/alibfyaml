@@ -39,7 +39,7 @@
   internally consistent between these two error-reporting subsystems.
   Location converts to 1-indexed to match Parse_Error's convention;
   see the note on Fy_Mark in Libfyaml.Thin.
-* TODO Analyze how alibfyaml interacts with libfyaml's zero-copy string handling
+* DONE Analyze how alibfyaml interacts with libfyaml's zero-copy string handling
   libfyaml avoids copying strings wherever the decoded value coincides
   with the source bytes:
 
@@ -92,7 +92,21 @@
   - Should alibfyaml expose the non-copying fy_node_create_scalar
     (zero-copy construction) as an option alongside Create_Scalar,
     with clear Ada-side ownership/lifetime documentation, for callers
-    who want to avoid the copy? Still open.
+    who want to avoid the copy?
+
+    DECIDED: no. Create_Scalar already has to copy the caller's Ada
+    String into a heap C buffer first (Ada strings aren't
+    null-terminated, and are often stack-allocated) -- a no-copy
+    fy_node_create_scalar would only save libfyaml's *second*,
+    internal copy. Every existing call site builds a handful of
+    scalars per document as one-off tree edits, not in a hot loop, so
+    that saving has no concrete workload behind it. Making it safe
+    would need new infrastructure Document doesn't have: a growable
+    collection of Buffer_Refs (one per zero-copy scalar, kept alive
+    for the whole document's life, since libfyaml gives no callback
+    for "this node was removed, its buffer can be freed"). Not worth
+    that complexity with no real need driving it -- see PLAN.md's
+    "Zero-copy Create_Scalar" section. Create_Scalar stays copy-only.
   - RESOLVED: Document the general rule for binding consumers: which
     Node-returning accessors hand back data whose lifetime is tied to
     the Document's input buffer vs. document-owned storage.
