@@ -48,6 +48,8 @@ cd test
 ./test_streams
 ./test_mutate
 ./test_anchors
+./test_parse_errors
+./test_location
 ```
 
 Each prints `ok   - <label>` / `FAIL - <label>` per check and ends

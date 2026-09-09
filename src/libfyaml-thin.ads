@@ -32,12 +32,14 @@ package Libfyaml.Thin is
    type Fy_Node_Pair is new System.Address;
    type Fy_Diag     is new System.Address;
    type Fy_Parser   is new System.Address;
+   type Fy_Token    is new System.Address;
 
    Null_Fy_Document  : constant Fy_Document  := Fy_Document (System.Null_Address);
    Null_Fy_Node      : constant Fy_Node      := Fy_Node (System.Null_Address);
    Null_Fy_Node_Pair : constant Fy_Node_Pair := Fy_Node_Pair (System.Null_Address);
    Null_Fy_Diag      : constant Fy_Diag      := Fy_Diag (System.Null_Address);
    Null_Fy_Parser    : constant Fy_Parser    := Fy_Parser (System.Null_Address);
+   Null_Fy_Token     : constant Fy_Token     := Fy_Token (System.Null_Address);
 
    -----------------------
    --  fy_node_type enum --
@@ -247,6 +249,48 @@ package Libfyaml.Thin is
    function fy_node_get_tag
      (Fyn : Fy_Node; Lenp : access C.size_t) return CS.chars_ptr
      with Import, Convention => C, External_Name => "fy_node_get_tag";
+
+   ------------------------------------
+   --  struct fy_mark / token marks  --
+   ------------------------------------
+
+   type Fy_Mark is record
+      Input_Pos : C.size_t;
+      Line      : C.int;
+      Column    : C.int;
+   end record
+     with Convention => C;
+   --  Line/Column are 0-index based (confirmed against the header's own
+   --  "@line: Line position (0 index based)" and live against a known
+   --  fixture) -- unlike Fy_Diag_Error.Line/Column above, which are
+   --  1-indexed (confirmed the same way: a 2-line file with a trailing
+   --  newline and an unclosed flow sequence reports error line 3,
+   --  column 1, matching 1-based counting into the file's implicit
+   --  third, empty, EOF line). libfyaml is not internally consistent
+   --  between these two error-reporting subsystems; Libfyaml.Nodes.
+   --  Location converts to 1-indexed to match Fy_Diag_Error's
+   --  convention (and ordinary editor/human expectations) rather than
+   --  passing 0-indexed values through.
+
+   type Fy_Mark_Access is access constant Fy_Mark;
+   pragma Convention (C, Fy_Mark_Access);
+
+   function fy_node_get_scalar_token (Fyn : Fy_Node) return Fy_Token
+     with Import, Convention => C, External_Name => "fy_node_get_scalar_token";
+   --  NULL if Fyn is not a scalar node (aliases count as scalars here,
+   --  per the header: "if this call is issued on an alias node the
+   --  return shall be of an alias token"). Confirmed live: an ordinary
+   --  scalar, an empty/omitted scalar ("key:" with nothing after), and
+   --  an alias node all return a real token; a mapping/sequence node
+   --  returns NULL.
+
+   function fy_token_start_mark (Fyt : Fy_Token) return Fy_Mark_Access
+     with Import, Convention => C, External_Name => "fy_token_start_mark";
+   --  NULL is documented as possible ("permissable for some token
+   --  types to have no start marker because they are without
+   --  content") but not observed live for any scalar token case
+   --  above -- Libfyaml.Nodes.Has_Location still checks for it rather
+   --  than assuming.
 
    ------------------------
    --  Scalar node access --

@@ -54,6 +54,47 @@ package Libfyaml.Nodes is
      with Pre => Is_Valid (N) and then Is_Scalar (N);
    --  The decoded scalar text (quotes/escapes already resolved).
 
+   -----------------------------
+   --  Source location        --
+   -----------------------------
+
+   type Node_Location is record
+      Line   : Positive;
+      Column : Positive;
+   end record;
+   --  1-indexed, matching Libfyaml.Parse_Error's own message
+   --  convention (and ordinary editor/human expectations) -- not
+   --  libfyaml's own 0-indexed struct fy_mark, which this converts
+   --  from. See the note on Fy_Mark in Libfyaml.Thin.
+
+   function Has_Location (N : Node) return Boolean
+     with Pre => Is_Valid (N) and then Is_Scalar (N);
+   --  True if N's scalar token carries a start location. Confirmed
+   --  True live for an ordinary scalar, an empty/omitted scalar
+   --  ("key:" with nothing after), and an alias node; libfyaml's own
+   --  header allows for a token with none ("permissable for some
+   --  token types to have no start marker"), so this is still a real
+   --  check, not a formality -- call it before Location rather than
+   --  assuming.
+   --
+   --  Also True, surprisingly, for a Node built via
+   --  Libfyaml.Documents.Create_Scalar rather than parsed -- confirmed
+   --  live: its token carries a synthetic all-zero mark (Location
+   --  (1, 1) after the 1-indexing conversion below), not a NULL one.
+   --  Has_Location alone cannot tell "genuinely parsed at (1, 1)"
+   --  apart from "freshly built, no real location" -- if that
+   --  distinction matters to a caller, they need another way to know
+   --  whether N came from parsing.
+
+   function Location (N : Node) return Node_Location
+     with Pre => Is_Valid (N) and then Is_Scalar (N) and then Has_Location (N);
+   --  The start position of N's own scalar text in the source input
+   --  (not, for an alias node, the position of the `*` sigil before
+   --  it -- confirmed live that the token's own span starts at the
+   --  anchor-name text). See the Has_Location note above for the
+   --  freshly-built-node case -- (1, 1) does not by itself mean N was
+   --  parsed from line 1, column 1 of real input.
+
    ----------------------------------
    --  Typed scalar node access    --
    ----------------------------------

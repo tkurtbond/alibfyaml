@@ -1,22 +1,44 @@
-* TODO Add source-location access to alibfyaml
-  libfyaml tracks source positions throughout parsing, but alibfyaml
-  doesn't expose any of it yet beyond the file/line/column already
-  folded into Parse_Error's message (via fy_diag_error).
+* DONE Add source-location access to alibfyaml
+  Implemented as Libfyaml.Nodes.Has_Location/Location on a scalar
+  Node: a 1-indexed (Line, Column) start position, via
+  fy_node_get_scalar_token + fy_token_start_mark. Covered by
+  test/test_location.adb (ordinary scalar, empty/omitted scalar,
+  alias node, and a freshly-built not-parsed scalar). Confirmed
+  leak-free under valgrind.
 
-  Not bound yet:
-  - fy_mark (line/column/position) accessors
-  - FYPCF_CREATE_MARKERS parser config flag (controls whether markers
-    are retained at all)
-  - fy_node_get_start_token / token-based position lookup for an
-    arbitrary Node
-  - fy_node_report and similar node/token-level diagnostic-with-location
-    functions
+  Two names from this item's original wishlist turned out not to
+  correspond to anything real in the libfyaml header actually linked
+  here, confirmed live rather than assumed:
+  - FYPCF_CREATE_MARKERS -- no such flag exists in this API version;
+    ordinary parsing already produces marks, no opt-in needed.
+  - fy_node_get_start_token -- the real name is
+    fy_node_get_scalar_token, and it's scalar-only; there is no
+    generic "start token of any node" for a sequence/mapping node
+    (fy_node_get_scalar_token returns NULL for those, confirmed).
 
-  Would let a caller report "this node's value is malformed" with its
-  own source location, e.g. for the typed-scalar Data_Error cases
-  (Integer_Value, Boolean_Value, etc.) -- currently those errors carry
-  only the offending text, no line/column. Reasonable follow-on to the
-  typed-accessors work.
+  Deliberately not built (no concrete need yet, cheap to add later if
+  one shows up -- same token/mark mechanism, no new infrastructure):
+  - A node's tag location (fy_node_get_tag_token), alongside the
+    existing Tag accessor.
+  - A token's *end* mark (fy_token_end_mark), for a location that's a
+    span rather than just a start point.
+  - Wiring Location into the typed-scalar Data_Error cases'
+    (Integer_Value, Boolean_Value, etc.) exception messages -- this
+    item's original motivating example, but a separate change to six
+    existing accessors' message text, not part of the primitive
+    itself.
+  - fy_node_report and similar node/token-level diagnostic functions:
+    variadic/va_list-based, out of scope for the same reason
+    README.md already excludes fy_document_scanf/fy_node_buildf --
+    Ada cannot call C variadic functions generically.
+
+  One more thing confirmed live while building this, unrelated to the
+  API-naming corrections above: libfyaml's own struct fy_mark
+  (line/column) is 0-indexed, but the pre-existing fy_diag_error
+  (Parse_Error's own source) is 1-indexed -- libfyaml is not
+  internally consistent between these two error-reporting subsystems.
+  Location converts to 1-indexed to match Parse_Error's convention;
+  see the note on Fy_Mark in Libfyaml.Thin.
 * TODO Analyze how alibfyaml interacts with libfyaml's zero-copy string handling
   libfyaml avoids copying strings wherever the decoded value coincides
   with the source bytes:

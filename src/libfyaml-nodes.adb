@@ -13,6 +13,8 @@ package body Libfyaml.Nodes is
    use type Thin.Fy_Node_Pair;
    use type Thin.Fy_Node_Type;
    use type Thin.Fy_Node_Style;
+   use type Thin.Fy_Token;
+   use type Thin.Fy_Mark_Access;
 
    ------------------------------------------------------------------
    --  YAML 1.2 core schema scalar-shape validation, private to     --
@@ -213,6 +215,20 @@ package body Libfyaml.Nodes is
       end if;
       return CS.Value (Ptr, Len);
    end Scalar_Value;
+
+   function Has_Location (N : Node) return Boolean is
+      Tok : constant Thin.Fy_Token := Thin.fy_node_get_scalar_token (N.Handle);
+   begin
+      return Tok /= Thin.Null_Fy_Token
+        and then Thin.fy_token_start_mark (Tok) /= null;
+   end Has_Location;
+
+   function Location (N : Node) return Node_Location is
+      Tok : constant Thin.Fy_Token := Thin.fy_node_get_scalar_token (N.Handle);
+      Mk  : constant Thin.Fy_Mark_Access := Thin.fy_token_start_mark (Tok);
+   begin
+      return (Line => Positive (Mk.Line + 1), Column => Positive (Mk.Column + 1));
+   end Location;
 
    function Is_Null_Value (N : Node) return Boolean is
      (Boolean (Thin.fy_node_is_null (N.Handle))
