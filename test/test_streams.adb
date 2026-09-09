@@ -17,6 +17,10 @@ procedure Test_Streams is
 
    Failures : Natural := 0;
 
+   function Has_Prefix (S, Prefix : String) return Boolean is
+     (S'Length >= Prefix'Length
+      and then S (S'First .. S'First + Prefix'Length - 1) = Prefix);
+
    procedure Check (Label : String; Condition : Boolean) is
    begin
       if Condition then
@@ -152,6 +156,7 @@ begin
       Stream : Streams.Document_Stream := Streams.Open_String (Text);
       Saw_First : Boolean := False;
       Raised_Parse_Error : Boolean := False;
+      Reports_As_String : Boolean := False;
       Has_Next_After_Error : Boolean := True;
    begin
       if Streams.Has_Next (Stream) then
@@ -171,13 +176,24 @@ begin
             end;
          end if;
       exception
-         when Libfyaml.Parse_Error =>
+         when E : Libfyaml.Parse_Error =>
             Raised_Parse_Error := True;
+            --  Open_String has no real filename, same as Parse_String
+            --  -- confirmed live that libfyaml's own fallback here is
+            --  a useless, run-varying "<memory-@ADDR-ADDR>" label;
+            --  Document_Stream.Open_String overrides it to the fixed
+            --  "(string-in-memory)" the same way Parse_String does.
+            Reports_As_String :=
+              Has_Prefix (Ada.Exceptions.Exception_Message (E),
+                          "(string-in-memory):");
       end;
       Has_Next_After_Error := Streams.Has_Next (Stream);
       Check ("first document of the bad stream still parsed fine", Saw_First);
       Check ("malformed second document -> Parse_Error, not silent end-of-stream",
              Raised_Parse_Error);
+      Check ("Open_String's Parse_Error reports ""(string-in-memory)"", " &
+             "not libfyaml's own synthetic memory-address label",
+             Reports_As_String);
       Check ("Has_Next after the error reports a clean end, not another " &
              "(stale) Parse_Error -- the third, well-formed document is " &
              "genuinely unreachable, but the stream stops honestly instead " &

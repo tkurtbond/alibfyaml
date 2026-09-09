@@ -1,3 +1,4 @@
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with System;
 
@@ -9,7 +10,9 @@ package body Libfyaml.Documents is
    use type Thin.Fy_Document;
    use type Thin.Fy_Diag_Error_Access;
 
-   function Collected_Errors (Diag : Thin.Fy_Diag) return String is
+   function Collected_Errors
+     (Diag : Thin.Fy_Diag; File_Override : String := "") return String
+   is
       use Ada.Strings.Unbounded;
       Msg  : Unbounded_String;
       Prev : aliased System.Address := System.Null_Address;
@@ -20,12 +23,28 @@ package body Libfyaml.Documents is
          exit when Err = null;
          declare
             File : constant String :=
-              (if Err.File /= CS.Null_Ptr then CS.Value (Err.File) else "<input>");
+              (if File_Override'Length > 0 then File_Override
+               elsif Err.File /= CS.Null_Ptr then CS.Value (Err.File)
+               else "<input>");
             Text : constant String :=
               (if Err.Msg /= CS.Null_Ptr then CS.Value (Err.Msg) else "");
+            Line   : constant String :=
+              Ada.Strings.Fixed.Trim (Err.Line'Image, Ada.Strings.Left);
+            Column : constant String :=
+              Ada.Strings.Fixed.Trim (Err.Column'Image, Ada.Strings.Left);
          begin
-            Append (Msg, File);
-            Append (Msg, ":" & Err.Line'Image & ":" & Err.Column'Image & ": " & Text & ASCII.LF);
+            --  gcc diagnostic format: "file:line:column: error: message"
+            --  -- no space between the colons and the numbers (Err.Line/
+            --  Column'Image, being signed, carries one for a non-negative
+            --  value unless trimmed), and an explicit "error:" severity
+            --  word. Every entry fy_diag_errors_iterate hands back here
+            --  is a genuine error (that's what "collect errors" means,
+            --  confirmed by the function's own naming and doc comment --
+            --  libfyaml is not filtering a mix of severities down to this
+            --  one collection), so hardcoding "error:" rather than mapping
+            --  Err.Err_Type is not a simplification that loses anything.
+            Append (Msg, File & ":" & Line & ":" & Column & ": error: " &
+                    Text & ASCII.LF);
          end;
       end loop;
       return To_String (Msg);
@@ -34,7 +53,8 @@ package body Libfyaml.Documents is
    function Parse_Common
      (Build : not null access function
         (Cfg : access constant Thin.Fy_Parse_Cfg) return Thin.Fy_Document;
-      Flags : C.unsigned := 0)
+      Flags : C.unsigned := 0;
+      File_Override : String := "")
       return Document
    is
       Diag : constant Thin.Fy_Diag := Thin.fy_diag_create (System.Null_Address);
@@ -48,7 +68,7 @@ package body Libfyaml.Documents is
       begin
          if Handle = Thin.Null_Fy_Document then
             declare
-               Text : constant String := Collected_Errors (Diag);
+               Text : constant String := Collected_Errors (Diag, File_Override);
             begin
                --  Diag is NOT destroyed here: raising below is itself
                --  "anything else above" from the exception handler's
@@ -99,7 +119,8 @@ package body Libfyaml.Documents is
       --  directly into this buffer. Ownership transfers to the Document
       --  (see Owned_Buffer in the spec) and it's freed in Finalize.
       return Result : Document :=
-        Parse_Common (Build'Access, Resolve_Flags (Resolve_Anchors))
+        Parse_Common
+          (Build'Access, Resolve_Flags (Resolve_Anchors), "(string-in-memory)")
       do
          Result.Owned_Buffer := C_Text;
       end return;

@@ -88,6 +88,16 @@ private
       Pending      : Thin.Fy_Document := Thin.Null_Fy_Document;
       Peeked       : Boolean := False;
       --  Has_Next's one-ahead read-ahead cache, consumed by Next.
+      From_String  : Boolean := False;
+      --  Set by Open_String, left False by Open_File: Fetch passes
+      --  this to Collected_Errors' File_Override so a Parse_Error
+      --  from a string-origin stream reports "(string-in-memory)"
+      --  instead of libfyaml's own synthetic, useless
+      --  "<memory-@ADDR-ADDR>" filename -- see Libfyaml.Documents.
+      --  Parse_String, which has the identical issue for the same
+      --  reason (fy_parser_set_string, like
+      --  fy_document_build_from_string, has no real filename to
+      --  report).
    end record;
 
    overriding procedure Finalize (Stream : in out Document_Stream);

@@ -146,8 +146,20 @@ private
 
    overriding procedure Finalize (Doc : in out Document);
 
-   function Collected_Errors (Diag : Thin.Fy_Diag) return String;
-   --  Format Diag's collected errors as "file:line:col: message" lines.
+   function Collected_Errors
+     (Diag : Thin.Fy_Diag; File_Override : String := "") return String;
+   --  Format Diag's collected errors as gcc-style
+   --  "file:line:column: error: message" lines (one per collected
+   --  error). Each error's own Fy_Diag_Error.File is used unless
+   --  File_Override is non-empty, in which case every line uses that
+   --  instead -- for string input (Parse_String, Document_Stream.
+   --  Open_String), libfyaml has no real filename to report and
+   --  falls back to a synthetic "<memory-@ADDR-ADDR>" label
+   --  (confirmed live) that is useless to a human or an editor
+   --  jumping to it, and differs from run to run. Parse_String passes
+   --  "(string-in-memory)" here for exactly that reason; Parse_File
+   --  passes nothing, since Fy_Diag_Error.File already correctly
+   --  echoes back the real path there.
    --  Declared here (not just in the body) so the child package
    --  Libfyaml.Documents.Streams can reuse it instead of duplicating
    --  the same formatting logic.

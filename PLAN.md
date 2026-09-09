@@ -559,6 +559,29 @@ since `Parse_Common` creates and destroys a fresh `Diag` each call —
 unlike `Document_Stream`), and successful parsing afterward. All
 confirmed leak- and error-free under valgrind.
 
+## Parse_Error message reformatted to gcc diagnostic style (fixed)
+
+**[done]** `Collected_Errors` (the function behind every
+`Parse_Error` message) used to emit `file:` then `Err.Line'Image`
+directly — GNAT's `'Image` on a signed integer carries a leading
+space for a non-negative value, so the actual text was
+`"file: 3: 1: message"`, not `"file:3:1: message"`, and had no
+severity keyword at all. Found while building two example programs
+(`test/example_syntax_error.adb`, `test/example_value_error.adb`)
+meant to demonstrate reporting an error in gcc's own
+`file:line:column: error: message` format — the existing message
+didn't actually match it.
+
+Fixed by trimming each number's `'Image` and inserting `"error: "`
+before the text. Hardcoding `"error"` rather than mapping
+`Fy_Diag_Error.Err_Type` to a real severity word is deliberate:
+`fy_diag_errors_iterate`'s own naming and doc comment ("iterates over
+the errors collected") indicate every entry reaching this function is
+already an error, not a mix of severities filtered down to one label.
+No test asserted the old exact message text (only that it was
+non-empty), so this is a pure formatting improvement, not a breaking
+change to anything in this repo.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or

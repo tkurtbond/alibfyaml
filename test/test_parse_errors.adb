@@ -26,6 +26,10 @@ procedure Test_Parse_Errors is
 
    Failures : Natural := 0;
 
+   function Has_Prefix (S, Prefix : String) return Boolean is
+     (S'Length >= Prefix'Length
+      and then S (S'First .. S'First + Prefix'Length - 1) = Prefix);
+
    procedure Check (Label : String; Condition : Boolean) is
    begin
       if Condition then
@@ -66,9 +70,17 @@ begin
    -----------------------------------------------------------------
    --  Parse_String on malformed input: same double-free risk, same
    --  fix, exercised through Parse_Common's other caller.
+   --
+   --  Also checks the message's "file" field: libfyaml has no real
+   --  filename for string input and falls back to a synthetic,
+   --  useless "<memory-@ADDR-ADDR>" label (confirmed live) -- this
+   --  binding overrides it to the fixed "(string-in-memory)" instead
+   --  (Libfyaml.Documents.Parse_String passes that as
+   --  Parse_Common's/Collected_Errors' File_Override).
    -----------------------------------------------------------------
    declare
-      Raised : Boolean := False;
+      Raised           : Boolean := False;
+      Reports_As_String : Boolean := False;
    begin
       begin
          declare
@@ -78,11 +90,17 @@ begin
             null;
          end;
       exception
-         when Libfyaml.Parse_Error =>
+         when E : Libfyaml.Parse_Error =>
             Raised := True;
+            Reports_As_String :=
+              Has_Prefix (Ada.Exceptions.Exception_Message (E),
+                          "(string-in-memory):");
       end;
       Check ("Parse_String on malformed input raises Parse_Error " &
              "(not a process abort)", Raised);
+      Check ("Parse_String's Parse_Error reports ""(string-in-memory)"", " &
+             "not libfyaml's own synthetic memory-address label",
+             Reports_As_String);
    end;
 
    -----------------------------------------------------------------

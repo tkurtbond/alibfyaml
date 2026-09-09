@@ -41,7 +41,8 @@ package body Libfyaml.Documents.Streams is
       return Document_Stream'
         (Ada.Finalization.Limited_Controlled with
            Handle => Fyp, Diag => Diag, Owned_Buffer => C_Text,
-           Pending => Thin.Null_Fy_Document, Peeked => False);
+           Pending => Thin.Null_Fy_Document, Peeked => False,
+           From_String => True);
    end Open_String;
 
    function Open_File (Path : String) return Document_Stream is
@@ -79,7 +80,8 @@ package body Libfyaml.Documents.Streams is
       return Document_Stream'
         (Ada.Finalization.Limited_Controlled with
            Handle => Fyp, Diag => Diag, Owned_Buffer => C_Path,
-           Pending => Thin.Null_Fy_Document, Peeked => False);
+           Pending => Thin.Null_Fy_Document, Peeked => False,
+           From_String => False);
    end Open_File;
 
    --  Swap Stream's Diag for a brand new one. fy_diag_got_error is a
@@ -137,7 +139,9 @@ package body Libfyaml.Documents.Streams is
       if Fyd = Thin.Null_Fy_Document and then Boolean (Thin.fy_diag_got_error (Stream.Diag))
       then
          declare
-            Text : constant String := Libfyaml.Documents.Collected_Errors (Stream.Diag);
+            Text : constant String := Libfyaml.Documents.Collected_Errors
+              (Stream.Diag,
+               (if Stream.From_String then "(string-in-memory)" else ""));
          begin
             Replace_Diag (Stream);
             if Text'Length > 0 then

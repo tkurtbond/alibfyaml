@@ -10,6 +10,8 @@ test/test_mutate
 test/test_anchors
 test/test_parse_errors
 test/test_location
+test/example_syntax_error
+test/example_value_error
 
 
 *~

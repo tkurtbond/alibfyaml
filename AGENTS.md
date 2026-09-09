@@ -52,6 +52,13 @@ cd test
 ./test_location
 ```
 
+`example_*.adb` in the same directory (also `Main`s in `test.gpr`,
+also gitignored by name) are demo programs, not `Check`/ok/FAIL
+regression tests -- `example_syntax_error.adb` and
+`example_value_error.adb` show reporting a parse-time vs. a
+typed-value error in gcc's `file:line:column: error: message`
+diagnostic style. Same two-edit rule applies when adding one.
+
 Each prints `ok   - <label>` / `FAIL - <label>` per check and ends
 with "All checks passed." or "<N> check(s) failed." -- grep for `FAIL`
 or check the trailing line, not just exit status.
