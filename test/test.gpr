@@ -8,10 +8,11 @@ project Test is
    for Exec_Dir use ".";
    for Main use
      ("test_quickstart.adb", "test_sequence.adb", "test_scalars.adb",
-      "test_navigate.adb", "test_streams.adb");
+      "test_navigate.adb", "test_streams.adb", "test_mutate.adb");
 
    package Compiler is
-      for Default_Switches ("Ada") use ("-gnat2012", "-gnatwa", "-g");
+      for Default_Switches ("Ada") use ("-gnat2012", "-gnatwa", "-gnata", "-g");
+      --  -gnata: see the matching note in ../libfyaml_ada.gpr.
    end Compiler;
 
 end Test;

@@ -95,16 +95,64 @@ begin
    end;
 
    -----------------------------------------------------------------
+   --  Boundary: an empty stream (no documents at all) reports
+   --  Has_Next = False immediately, not an error.
+   -----------------------------------------------------------------
+   declare
+      Stream : Streams.Document_Stream := Streams.Open_String ("");
+   begin
+      Check ("Open_String ("""") has no documents", not Streams.Has_Next (Stream));
+   end;
+
+   -----------------------------------------------------------------
+   --  Boundary: a stream containing exactly one document behaves the
+   --  same as Parse_String would for that one document, then reports
+   --  a clean end.
+   -----------------------------------------------------------------
+   declare
+      Stream : Streams.Document_Stream :=
+        Streams.Open_String ("---" & ASCII.LF & "name: only" & ASCII.LF);
+      Count  : Natural := 0;
+   begin
+      while Streams.Has_Next (Stream) loop
+         Count := Count + 1;
+         declare
+            D : constant Doc.Document := Streams.Next (Stream);
+         begin
+            Check ("single-document stream: document" & Count'Image & " name",
+                   D.Root.String_Value ("name") = "only");
+         end;
+      end loop;
+      Check ("single-document stream yielded exactly 1 document", Count = 1);
+   end;
+
+   -----------------------------------------------------------------
    --  A parse error partway through a stream must raise
-   --  Libfyaml.Parse_Error, not look like a clean end of stream.
+   --  Libfyaml.Parse_Error, not look like a clean end of stream -- and
+   --  calling Has_Next *again* afterward must not raise a second, stale
+   --  Parse_Error quoting the same old message (fy_diag_got_error is a
+   --  sticky flag, and libfyaml has no way to clear its cumulative
+   --  collected-errors list; Fetch used to re-raise Parse_Error for
+   --  every later Has_Next/Next call as a result -- confirmed live
+   --  before this fix). It should instead report a clean end of stream:
+   --  libfyaml's streaming parser cannot resync past a malformed
+   --  document to reach further ones in the same stream (confirmed
+   --  separately -- even an explicit parser reset does not restore
+   --  usable input state), so "no more documents" is the honest answer,
+   --  not a design goal recovered here -- only the misleading repeated
+   --  exception is what this fixes. A third, well-formed document is
+   --  included below specifically to prove it's genuinely unreachable
+   --  after the error, not just untested.
    -----------------------------------------------------------------
    declare
       Text : constant String :=
         "---" & ASCII.LF & "name: ok" & ASCII.LF &
-        "---" & ASCII.LF & "[unterminated flow sequence" & ASCII.LF;
+        "---" & ASCII.LF & "[unterminated flow sequence" & ASCII.LF &
+        "---" & ASCII.LF & "name: third" & ASCII.LF;
       Stream : Streams.Document_Stream := Streams.Open_String (Text);
       Saw_First : Boolean := False;
       Raised_Parse_Error : Boolean := False;
+      Has_Next_After_Error : Boolean := True;
    begin
       if Streams.Has_Next (Stream) then
          declare
@@ -126,9 +174,15 @@ begin
          when Libfyaml.Parse_Error =>
             Raised_Parse_Error := True;
       end;
+      Has_Next_After_Error := Streams.Has_Next (Stream);
       Check ("first document of the bad stream still parsed fine", Saw_First);
       Check ("malformed second document -> Parse_Error, not silent end-of-stream",
              Raised_Parse_Error);
+      Check ("Has_Next after the error reports a clean end, not another " &
+             "(stale) Parse_Error -- the third, well-formed document is " &
+             "genuinely unreachable, but the stream stops honestly instead " &
+             "of raising Parse_Error again with the earlier document's " &
+             "stale message", not Has_Next_After_Error);
    exception
       when E : others =>
          Ada.Text_IO.Put_Line

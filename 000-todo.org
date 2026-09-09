@@ -50,13 +50,30 @@
     passed across the Ada/C boundary needs to outlive something it
     currently doesn't (Insert_At paths, mapping keys via
     fy_node_mapping_lookup_value_by_string, etc.)?
+    RESOLVED for both:
+    - mapping keys (fy_node_mapping_lookup_value_by_string): safe as
+      written. libfyaml's own header says the key argument is "the
+      YAML source to use as key" and the lookup works "from the YAML
+      node created from the @key argument" -- the key text is parsed
+      into a transient node for comparison during the call itself, not
+      retained afterward, so Libfyaml.Nodes.Value/Has_Key/Required's
+      immediate CS.Free (C_Key) right after the call is correct.
+    - Insert_At's path string: same reasoning, also safe to free
+      immediately (libfyaml copies/parses the path before use, per the
+      same pattern as the key case above). Insert_At turned out to
+      have a real, different lifetime hazard instead -- not about the
+      path string, but about the *target node* argument: libfyaml
+      unconditionally unrefs it, and frees it outright if the
+      operation fails. Fixed: Insert_At's N parameter is now "in out"
+      and is nulled out on failure. See its doc comment in
+      src/libfyaml-documents.ads.
   - Should alibfyaml expose the non-copying fy_node_create_scalar
     (zero-copy construction) as an option alongside Create_Scalar,
     with clear Ada-side ownership/lifetime documentation, for callers
-    who want to avoid the copy?
+    who want to avoid the copy? Still open.
   - Document the general rule for binding consumers: which Node-
     returning accessors hand back data whose lifetime is tied to the
-    Document's input buffer vs. document-owned storage.
+    Document's input buffer vs. document-owned storage. Still open.
 * TODO Can alibfyaml be extended to read from existing Ada File_Type variables, like Current_Input and Standard_Input?
 How does that work with libfyaml's zero copy?
 * CANCELLED Resolve YAML 1.1 language-independent types: timestamp, binary, merge, omap, pairs, set

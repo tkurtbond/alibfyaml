@@ -59,3 +59,11 @@ bad_underscore_double: 1__2
 
 # "2" is not a valid binary digit.
 bad_binary: 0b102
+
+# A sign combined with a 0x/0o/0b prefix.
+int_hex_neg: -0x1A
+
+# Exceeds even Long_Long_Integer'Last / Long_Float'Last (both 64-bit),
+# so the widest accessor of each kind also has a Data_Error path.
+huge_int: 99999999999999999999999999999
+huge_float: 1.0e400

@@ -82,6 +82,48 @@ package body Libfyaml.Documents.Streams is
            Pending => Thin.Null_Fy_Document, Peeked => False);
    end Open_File;
 
+   --  Swap Stream's Diag for a brand new one. fy_diag_got_error is a
+   --  sticky flag and fy_diag_errors_iterate's collected-errors list is
+   --  cumulative -- libfyaml never clears either on its own, and there
+   --  is no clear-collected-errors call, only fy_diag_reset_error (which
+   --  clears the flag but not the stale error text). Since a
+   --  Document_Stream keeps one Diag alive for its whole lifetime (see
+   --  the Diag field comment in the spec), replacing it after each error
+   --  is the only way to stop that error from being misreported against
+   --  a later Fetch call -- confirmed live before this fix: every
+   --  Has_Next/Next call after a parse error raised Libfyaml.Parse_Error
+   --  again, quoting the earlier document's now-stale message, even once
+   --  the underlying parser had genuinely reached a clean end of input.
+   --
+   --  This does NOT make the stream able to resume reading further
+   --  documents *past* a malformed one, though -- confirmed separately
+   --  that libfyaml's streaming parser cannot resync mid-stream after an
+   --  error (fy_parse_load_document keeps returning NULL, and even an
+   --  explicit fy_parser_reset does not restore usable input state: it
+   --  leaves the parser reporting "out of tokens and failed to produce
+   --  anymore"). That is a limitation of libfyaml's public streaming API
+   --  itself, not something fixable from this binding. What this fix
+   --  does is turn "keeps raising a stale, misleading Parse_Error
+   --  forever" into an honest "Has_Next returns False" once the
+   --  underlying parser has nothing left to give -- see test_streams.adb.
+   procedure Replace_Diag (Stream : in out Document_Stream) is
+      New_Diag : constant Thin.Fy_Diag := Thin.fy_diag_create (System.Null_Address);
+   begin
+      if New_Diag = Thin.Null_Fy_Diag then
+         --  Best effort: couldn't allocate a replacement -- leave the
+         --  old (now-stale) Diag in place rather than losing diagnostics
+         --  entirely. A later Has_Next/Next may misreport as before.
+         return;
+      end if;
+      Thin.fy_diag_set_collect_errors (New_Diag, C.C_bool (True));
+      if Thin.fy_parser_set_diag (Stream.Handle, New_Diag) = 0 then
+         Thin.fy_diag_destroy (Stream.Diag);
+         Stream.Diag := New_Diag;
+      else
+         Thin.fy_diag_destroy (New_Diag);
+      end if;
+   end Replace_Diag;
+
    --  Common to Has_Next and Next: call fy_parse_load_document once,
    --  and turn a NULL result that's actually a parse error (as opposed
    --  to a clean end of stream) into Libfyaml.Parse_Error -- the two
@@ -97,6 +139,7 @@ package body Libfyaml.Documents.Streams is
          declare
             Text : constant String := Libfyaml.Documents.Collected_Errors (Stream.Diag);
          begin
+            Replace_Diag (Stream);
             if Text'Length > 0 then
                raise Libfyaml.Parse_Error with Text;
             else

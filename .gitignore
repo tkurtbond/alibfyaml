@@ -6,6 +6,7 @@ test/test_sequence
 test/test_scalars
 test/test_navigate
 test/test_streams
+test/test_mutate
 
 
 *~

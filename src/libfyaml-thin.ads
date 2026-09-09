@@ -156,6 +156,21 @@ package Libfyaml.Thin is
    function fy_parse_load_document (Fyp : Fy_Parser) return Fy_Document
      with Import, Convention => C, External_Name => "fy_parse_load_document";
 
+   function fy_parser_set_diag (Fyp : Fy_Parser; Diag : Fy_Diag) return C.int
+     with Import, Convention => C, External_Name => "fy_parser_set_diag";
+   --  Replaces Fyp's diagnostic object with Diag. Per libfyaml's header:
+   --  the previous diag is unref'ed (freed if that drops its refcount to
+   --  0), and Diag itself gains a reference from the parser -- the
+   --  caller's own reference to Diag (from fy_diag_create) is untouched
+   --  and still needs its own fy_diag_destroy. Used by
+   --  Libfyaml.Documents.Streams to swap in a fresh Diag after a parse
+   --  error, since fy_diag_got_error is a sticky flag and
+   --  fy_diag_errors_iterate's collected-errors list is cumulative --
+   --  neither is cleared by libfyaml itself, and there is no
+   --  clear-collected-errors call, so the only way to stop a past error
+   --  from being misreported against later, unrelated documents is to
+   --  hand the parser a brand new Diag.
+
    procedure fy_document_destroy (Fyd : Fy_Document)
      with Import, Convention => C, External_Name => "fy_document_destroy";
 

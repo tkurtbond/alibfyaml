@@ -116,6 +116,8 @@ begin
              Map.Integer_Value ("int_underscore") = 1_000_000);
       Check ("Integer_Value (int_hex_underscore) = 65535 (0x + _ extension)",
              Map.Integer_Value ("int_hex_underscore") = 65535);
+      Check ("Integer_Value (int_hex_neg) = -26 (sign + 0x prefix)",
+             Map.Integer_Value ("int_hex_neg") = -26);
 
       Check ("Long_Integer_Value (int_dec) = 42",
              Map.Long_Integer_Value ("int_dec") = 42);
@@ -332,6 +334,39 @@ begin
       begin
          Expect_Data_Error
            ("Float_Value (float_overflow) -> Data_Error (overflow)", Try'Access);
+      end;
+
+      -----------------------------------------------------------------
+      --  Data_Error: numeric range overflow at the *widest* accessors
+      --  too -- big_int/float_overflow above are chosen to overflow
+      --  only the narrower Integer/Float, while still fitting
+      --  Long_Long_Integer/Long_Float; huge_int/huge_float exceed even
+      --  those.
+      -----------------------------------------------------------------
+      declare
+         procedure Try is
+            Unused : constant Long_Long_Integer :=
+              Map.Long_Long_Integer_Value ("huge_int");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Data_Error
+           ("Long_Long_Integer_Value (huge_int) -> Data_Error (overflow)",
+            Try'Access);
+      end;
+
+      declare
+         procedure Try is
+            Unused : constant Long_Float := Map.Long_Float_Value ("huge_float");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Data_Error
+           ("Long_Float_Value (huge_float) -> Data_Error (overflow)", Try'Access);
       end;
 
       -----------------------------------------------------------------

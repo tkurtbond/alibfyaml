@@ -9,7 +9,19 @@ library project Libfyaml_Ada is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        ("-gnat2012", "-gnatwa", "-gnatVa", "-g");
+        ("-gnat2012", "-gnatwa", "-gnatVa", "-gnata", "-g");
+      --  -gnata: enable assertion checking, so the Pre => contracts
+      --  throughout Libfyaml.Nodes (Is_Valid, Is_Scalar, ...) are
+      --  actually checked at runtime. Without it they compile away to
+      --  nothing, and a precondition violation (e.g. calling a typed
+      --  accessor on Null_Node) falls straight through into undefined
+      --  behavior on the C side instead of a clean Assertion_Error --
+      --  confirmed to produce three different silent-misbehavior
+      --  outcomes (a wrong-but-plausible answer, a misleadingly-valid
+      --  empty result, and an unhandled Constraint_Error) from the same
+      --  invalid handle. A consumer linking against a build of this
+      --  library that doesn't pass its own -gnata inherits this gap, so
+      --  it's enabled here rather than left to the consumer.
    end Compiler;
 
    --  This is a pure Ada import layer (Interfaces.C pragma Import bindings):
