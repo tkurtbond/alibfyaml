@@ -158,6 +158,22 @@ package Libfyaml.Thin is
       File : CS.chars_ptr) return Fy_Document
      with Import, Convention => C, External_Name => "fy_document_build_from_file";
 
+   function fy_document_build_from_fp
+     (Cfg : access constant Fy_Parse_Cfg;
+      Fp   : System.Address) return Fy_Document
+     with Import, Convention => C, External_Name => "fy_document_build_from_fp";
+   --  Fp is a C `FILE *` (e.g. Interfaces.C_Streams.FILEs, which is a
+   --  subtype of System.Address -- see Libfyaml.Documents.Text_IO,
+   --  which obtains one from an open Ada.Text_IO.File_Type via
+   --  Ada.Text_IO.C_Streams.C_Stream). Confirmed in libfyaml's own
+   --  source (fy-input.c) that this reads via fread() into a buffer
+   --  libfyaml allocates itself -- unlike fy_document_build_from_file,
+   --  which mmaps -- so a Document built this way holds no reference
+   --  into anything Ada-owned; no Owned_Buffer sharing is needed.
+   --  libfyaml does NOT fclose Fp (confirmed: fy-input.c only frees
+   --  its own internal read buffer for this input type) -- ownership
+   --  of the underlying file stays with the caller throughout.
+
    -----------------------------------------------------------------
    --  Streaming parser: multiple documents from one input
    --  (Libfyaml.Documents.Streams.Document_Stream). Distinct from
@@ -178,6 +194,16 @@ package Libfyaml.Thin is
    function fy_parser_set_input_file
      (Fyp : Fy_Parser; File : CS.chars_ptr) return C.int
      with Import, Convention => C, External_Name => "fy_parser_set_input_file";
+
+   function fy_parser_set_input_fp
+     (Fyp : Fy_Parser; Name : CS.chars_ptr; Fp : System.Address) return C.int
+     with Import, Convention => C, External_Name => "fy_parser_set_input_fp";
+   --  Fp: see fy_document_build_from_fp's comment above -- same
+   --  fread()-into-own-buffer behavior, same no-fclose ownership.
+   --  Used by Libfyaml.Documents.Text_IO to stream multiple documents
+   --  out of one open Ada.Text_IO.File_Type via Document_Stream, the
+   --  same way fy_parser_set_input_file backs
+   --  Libfyaml.Documents.Streams.Open_File.
 
    function fy_parse_load_document (Fyp : Fy_Parser) return Fy_Document
      with Import, Convention => C, External_Name => "fy_parse_load_document";

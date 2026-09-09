@@ -131,8 +131,57 @@
     section for the full writeup and src/libfyaml-documents.ads for
     Buffer_Ref itself. The rule as now documented is true because
     this fix makes it true, not because it always was.
-* TODO Can alibfyaml be extended to read from existing Ada File_Type variables, like Current_Input and Standard_Input?
-How does that work with libfyaml's zero copy?
+* DONE Can alibfyaml be extended to read from existing Ada File_Type variables, like Current_Input and Standard_Input?
+  Yes. New child package Libfyaml.Documents.Text_IO provides Parse
+  (File : Ada.Text_IO.File_Type; Resolve_Anchors : Boolean := True)
+  return Document, wired to libfyaml's fy_document_build_from_fp via
+  the underlying C FILE* (Ada.Text_IO.C_Streams.C_Stream (File), a
+  GNAT-specific bridge -- this is the one GNAT-only package in
+  alibfyaml as a result, called out in its own header comment). Works
+  for Current_Input and Standard_Input exactly the same as any other
+  File_Type, since both are just File_Type values (confirmed live,
+  including with a genuinely piped stdin under valgrind, not just the
+  Set_Input-onto-a-real-file trick kept in test/test_text_io.adb).
+
+  How it works with libfyaml's zero copy (confirmed against libfyaml's
+  own source, fy-input.c, not assumed from its header comments): a
+  FILE*-backed input is read lazily via fread() into a buffer libfyaml
+  allocates and owns itself -- neither Parse_File's mmap of the whole
+  file nor Parse_String's zero-copy span into the caller's own buffer.
+  The returned Document therefore holds no reference into anything
+  Ada-owned, and File need not outlive it. libfyaml does not close
+  File's underlying stream either (confirmed: it only frees its own
+  read buffer for this input kind) -- ownership stays with the caller.
+
+  One real caveat found live while testing this, documented in
+  Text_IO's own doc comment and not glossed over: libfyaml's fread()
+  reads in whole internal chunks, not "exactly one document's worth"
+  -- for most real files (anything smaller than one chunk) a single
+  Parse call silently consumes the *entire remaining file*, not just
+  the first document, leaving File at end-of-file. Calling Parse a
+  second time on the same File to get a second document therefore
+  does NOT work (confirmed live) -- it silently sees no more bytes,
+  not an error. Correctly streaming multiple documents out of one
+  FILE* would need libfyaml's other, persistent-parser API
+  (fy_parser_set_input_fp + repeated fy_parse_load_document on one
+  parser, the same shape Libfyaml.Documents.Streams.Open_File already
+  uses for paths) -- not implemented, since the question that prompted
+  this item was about reading a File_Type at all, not streaming
+  multiple documents from one; cheap to add the same way if a real
+  need for it shows up.
+
+  Also found and fixed, unrelated to Text_IO itself: sharing
+  Parse_Common between Parse_String/Parse_File and Text_IO.Parse
+  needed Parse_Common to stop returning Document (a tagged type --
+  RM 3.9.3(10) forbids a new private-part primitive of one's own
+  package's tagged type) and return the raw Thin.Fy_Document handle
+  instead, wrapped into a Document by each caller. That refactor
+  introduced a real, if narrow, regression along the way -- see
+  PLAN.md's "Parse_Common shared with Text_IO.Parse" section for the
+  full writeup of a genuinely easy-to-miss Ada gotcha it exposed
+  (a subprogram's own exception handler doesn't cover its own
+  declarative part), confirmed live with valgrind and fixed before
+  this item was considered done.
 * CANCELLED Resolve YAML 1.1 language-independent types: timestamp, binary, merge, omap, pairs, set
   The typed-scalar accessors in Libfyaml.Nodes (Is_Integer/Is_Float/
   Is_Boolean/Integer_Value/etc.) only resolve the YAML 1.2 core schema

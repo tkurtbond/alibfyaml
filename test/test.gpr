@@ -10,6 +10,7 @@ project Test is
      ("test_quickstart.adb", "test_sequence.adb", "test_scalars.adb",
       "test_navigate.adb", "test_streams.adb", "test_mutate.adb",
       "test_anchors.adb", "test_parse_errors.adb", "test_location.adb",
+      "test_text_io.adb",
       "example_syntax_error.adb", "example_value_error.adb");
 
    package Compiler is

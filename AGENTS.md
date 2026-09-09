@@ -50,6 +50,7 @@ cd test
 ./test_anchors
 ./test_parse_errors
 ./test_location
+./test_text_io
 ```
 
 `example_*.adb` in the same directory (also `Main`s in `test.gpr`,
@@ -147,3 +148,17 @@ is confirmed leak-free.
   new mutating operation, work out and document what happens to every
   `Node`/`Document` argument on both success and failure -- don't
   assume "success" means "safe to keep using as before."
+- **A subprogram body's own `exception` handler does NOT catch an
+  exception raised while elaborating its own declarative part** --
+  only exceptions from its statements. Easy to get backwards, and it
+  bit this codebase directly: refactoring `Parse_Common` to be shared
+  by `Parse_String`/`Parse_File`/`Libfyaml.Documents.Text_IO.Parse`
+  moved its call from a statement into `Handle : constant ... :=
+  Parse_Common (...);` in the declarative part -- `Parse_String`'s own
+  `when others => CS.Free (C_Text); raise;` handler silently stopped
+  running on every parse failure as a result (confirmed with a minimal
+  standalone reproduction, then confirmed as a real leak with
+  valgrind). Fixed by declaring `Handle` uninitialized and assigning
+  it as a statement instead. If a local cleanup handler exists,
+  anything it needs to protect must be called as a statement, not
+  used to initialize a declaration.

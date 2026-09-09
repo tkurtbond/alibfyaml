@@ -693,6 +693,129 @@ scalar-construction workload where the extra copy is measurably
 costly -- at which point the growable-`Buffer_Ref`-list design above
 is the starting point, not open design space.
 
+## Reading from an Ada Text_IO.File_Type -- Libfyaml.Documents.Text_IO
+
+**[done]** Answers 000-todo.org's remaining open item: can alibfyaml
+read from an already-open `Ada.Text_IO.File_Type`, including
+`Current_Input`/`Standard_Input`, and how does that interact with
+libfyaml's zero-copy handling?
+
+**New child package**, not an overload in the parent: `Libfyaml.
+Documents.Text_IO.Parse (File : Ada.Text_IO.File_Type; Resolve_Anchors
+: Boolean := True) return Document`. Kept separate from `Parse_String`/
+`Parse_File` because it depends on `Ada.Text_IO.C_Streams` (GNAT-
+specific, obtains the C `FILE *` underneath an open `File_Type`) --
+the same reasoning that already keeps multi-document streaming in its
+own child package (`Libfyaml.Documents.Streams`) rather than the
+parent: a consumer who doesn't need this input source, or who cares
+about compiler portability, never pays for the dependency.
+
+**Wired to `fy_document_build_from_fp`** (confirmed present in the
+actually-linked library via `nm -D`, same discipline as the rest of
+this file). Checked against libfyaml's own source (`fy-input.c`), not
+assumed from its header comments:
+
+- A `FILE*`-backed input (`fyit_stream`) is read lazily via `fread()`
+  into a buffer libfyaml allocates and owns itself -- neither
+  `Parse_File`'s mmap of the whole file (`fyit_file`) nor
+  `Parse_String`'s zero-copy span directly into the caller's own
+  buffer. The returned `Document` therefore holds no reference into
+  anything Ada-owned (`Owned_Buffer` is never set for it), and `File`
+  need not outlive it.
+- libfyaml does **not** `fclose` the `FILE*` for this input kind
+  (confirmed: `fy_input_reset`'s `fyit_stream` case only frees its own
+  internal read buffer) -- `File` stays open and is entirely the
+  caller's to close, same as any other GNAT `File_Type`.
+
+**A real caveat, found live rather than assumed, documented in
+`Text_IO`'s own doc comment and in `test/test_text_io.adb`:** libfyaml
+reads in whole internal chunks sized independently of document
+boundaries. For any file smaller than one chunk -- most real files --
+a single `Parse` call silently `fread()`s the *entire remaining file*
+out from under `File`, not just the bytes of the first document,
+leaving `File` at end-of-file even though only the first document was
+actually parsed. Confirmed with a throwaway probe against
+`test/streams.yaml` (three documents, ~76 bytes total): after parsing
+just the first, `End_Of_File (File)` was already `True`. A second
+`Parse` call on the same `File` does not raise or error -- it just
+silently sees no more bytes, never reaching a second document. This
+rules out repeated one-shot `Parse` calls as a way to stream multiple
+documents out of a `File_Type`; that would need libfyaml's other,
+persistent-parser API (`fy_parser_set_input_fp` + repeated
+`fy_parse_load_document` on one parser -- the same shape
+`Libfyaml.Documents.Streams.Open_File` already uses for paths).
+Not implemented here, since the motivating question was about reading
+a `File_Type` at all, not streaming multiple documents from one --
+cheap to add the same way later if a real need shows up, following
+the same "no concrete need yet" reasoning as the zero-copy
+`Create_Scalar` decision above.
+
+**Diagnostics:** `Text_IO.Parse` reuses `Collected_Errors`'
+`File_Override` parameter (already threaded through `Parse_Common`
+for `Parse_String`'s `"(string-in-memory)"` label) to report
+`Ada.Text_IO.Name (File)` as the "file" in a `Parse_Error`'s
+gcc-style message -- confirmed live that this gives a real path for
+an ordinary opened file and `"*stdin"` (GNAT's own convention, not
+this binding's) for `Standard_Input`/`Current_Input`, both genuinely
+informative, unlike `fy_document_build_from_fp`'s own fallback (a bare
+`"<stream-N>"` naming the file descriptor, since the convenience
+function passes no name of its own) which this binding avoids by not
+using it.
+
+**Confirmed live under valgrind**, three ways: the file-based and
+`Current_Input`/`Set_Input` cases in `test/test_text_io.adb`; a
+throwaway probe piping real content through the shell into
+`Standard_Input` (0 errors, all heap freed, deleted after confirming);
+and the full pre-existing test suite re-run after the refactor below,
+unaffected.
+
+### Parse_Common shared with Text_IO.Parse -- and the bug that refactor exposed
+
+Sharing `Parse_Common` (previously body-only, private to `Parse_String`/
+`Parse_File`) with `Text_IO.Parse` required moving its declaration into
+`Libfyaml.Documents`'s spec, alongside `Collected_Errors` (already
+shared with `Streams` the same way). That immediately hit a real Ada
+rule: `Parse_Common` originally returned `Document`, a tagged type: a
+*new* private-part subprogram with a controlling result of one's own
+package's tagged type is illegal unless it overrides an inherited
+operation (RM 3.9.3(10)). Fixed by having `Parse_Common` return the raw
+`Thin.Fy_Document` handle instead, with each caller (`Parse_String`,
+`Parse_File`, `Text_IO.Parse`) wrapping it into a `Document` itself --
+exactly what `Parse_File` already did before this change, so only
+`Parse_String` (which also attaches an `Owned_Buffer`) needed any real
+rework.
+
+That rework introduced a second, unrelated bug, found only because
+this project runs every touched test under valgrind before calling
+anything done: the natural-looking way to store `Parse_Common`'s
+result was `Handle : constant Thin.Fy_Document := Parse_Common (...);`
+in `Parse_String`/`Parse_File`'s declarative part. Valgrind showed
+`C_Text`/`C_Path` leaking on every parse failure -- a regression this
+same file already fixed once before (the `Parse_Common` double-free
+section above), now reintroduced in a different shape.
+
+**Root cause, confirmed with a minimal standalone reproduction, not
+just inferred from the leak:** a subprogram body's own `exception`
+handler does *not* catch an exception raised while elaborating that
+same body's declarative part -- only exceptions raised while executing
+its statements. `Parse_Common` raising `Libfyaml.Parse_Error` while
+initializing `Handle` therefore propagated straight past
+`Parse_String`'s own `when others => CS.Free (C_Text); raise;`
+handler to the caller, skipping the cleanup entirely, on every single
+parse failure. This is a genuine, easy-to-miss Ada gotcha -- code that
+reads as "obviously inside the body, so obviously covered by its
+handler" is not.
+
+**Fix:** declare `Handle : Thin.Fy_Document;` uninitialized, and assign
+it via `Handle := Parse_Common (...);` as a statement in the `begin`
+block instead, so the existing handler covers it. Confirmed live with
+valgrind against the exact three failure sites this broke
+(`test/test_parse_errors.adb`'s malformed-file and two malformed-string
+cases): 0 errors, all heap freed, both before this bug (verified
+against a clean checkout of the prior commit) and after the fix.
+Documented in `AGENTS.md`'s conventions section so it isn't
+rediscovered the same way by a future refactor.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or

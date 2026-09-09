@@ -88,7 +88,7 @@ package body Libfyaml.Documents is
         (Cfg : access constant Thin.Fy_Parse_Cfg) return Thin.Fy_Document;
       Flags : C.unsigned := 0;
       File_Override : String := "")
-      return Document
+      return Thin.Fy_Document
    is
       Diag : constant Thin.Fy_Diag := Thin.fy_diag_create (System.Null_Address);
       Cfg  : aliased Thin.Fy_Parse_Cfg;
@@ -120,8 +120,7 @@ package body Libfyaml.Documents is
             end;
          end if;
          Thin.fy_diag_destroy (Diag);
-         return Document'(Ada.Finalization.Limited_Controlled
-                           with Handle => Handle, Owned_Buffer => <>);
+         return Handle;
       end;
    exception
       --  Reached both by a genuine parse failure (Parse_Error raised
@@ -146,14 +145,29 @@ package body Libfyaml.Documents is
         (Cfg : access constant Thin.Fy_Parse_Cfg) return Thin.Fy_Document
       is (Thin.fy_document_build_from_string (Cfg, C_Text, C.size_t (Text'Length)));
 
+      Handle : Thin.Fy_Document;
    begin
+      --  Handle is deliberately left uninitialized above and assigned
+      --  here, as a statement, rather than initialized directly in the
+      --  declarative part: an exception raised while elaborating a
+      --  subprogram body's OWN declarative part is not caught by that
+      --  same body's own exception handler below (it propagates straight
+      --  to the caller instead, skipping it entirely -- confirmed with a
+      --  minimal standalone reproduction, a real, easy-to-miss Ada
+      --  gotcha) -- only exceptions raised while executing its
+      --  statements are. Parse_Common raising Libfyaml.Parse_Error on a
+      --  genuine parse failure is exactly such a case, and doing this
+      --  the other way leaked C_Text on every failed Parse_String call
+      --  (confirmed live with valgrind) until this fix.
+      Handle := Parse_Common
+        (Build'Access, Resolve_Flags (Resolve_Anchors), "(string-in-memory)");
       --  C_Text is NOT freed here: fy_document_build_from_string doesn't
       --  copy the input, so the resulting document's scalars can point
       --  directly into this buffer. Ownership transfers to the Document
       --  (see Owned_Buffer in the spec) and it's freed in Finalize.
       return Result : Document :=
-        Parse_Common
-          (Build'Access, Resolve_Flags (Resolve_Anchors), "(string-in-memory)")
+        (Ada.Finalization.Limited_Controlled with
+           Handle => Handle, Owned_Buffer => <>)
       do
          Result.Owned_Buffer := Make_Buffer_Ref (C_Text);
       end return;
@@ -172,12 +186,15 @@ package body Libfyaml.Documents is
         (Cfg : access constant Thin.Fy_Parse_Cfg) return Thin.Fy_Document
       is (Thin.fy_document_build_from_file (Cfg, C_Path));
 
+      Handle : Thin.Fy_Document;
    begin
-      return Result : constant Document :=
-        Parse_Common (Build'Access, Resolve_Flags (Resolve_Anchors))
-      do
-         CS.Free (C_Path);
-      end return;
+      --  See Parse_String's own comment on why Handle is assigned here,
+      --  as a statement, rather than initialized in the declarative
+      --  part above.
+      Handle := Parse_Common (Build'Access, Resolve_Flags (Resolve_Anchors));
+      CS.Free (C_Path);
+      return Document'(Ada.Finalization.Limited_Controlled with
+                          Handle => Handle, Owned_Buffer => <>);
    exception
       when others =>
          CS.Free (C_Path);

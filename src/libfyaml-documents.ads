@@ -218,4 +218,37 @@ private
    --  Libfyaml.Documents.Streams can reuse it instead of duplicating
    --  the same formatting logic.
 
+   function Parse_Common
+     (Build : not null access function
+        (Cfg : access constant Thin.Fy_Parse_Cfg) return Thin.Fy_Document;
+      Flags : C.unsigned := 0;
+      File_Override : String := "")
+      return Thin.Fy_Document;
+   --  Shared by every one-shot "build exactly one Document" entry
+   --  point (Parse_String, Parse_File, Libfyaml.Documents.Text_IO.
+   --  Parse): creates a Diag configured to collect errors, calls
+   --  Build with it wired into a fresh Fy_Parse_Cfg (Flags passed
+   --  through, e.g. Resolve_Flags's FYPCF_RESOLVE_DOCUMENT), and
+   --  turns a NULL result into Libfyaml.Parse_Error with the
+   --  collected, gcc-formatted text (via Collected_Errors above,
+   --  passing File_Override through unchanged). Diag is destroyed
+   --  exactly once on every path -- success or failure -- never
+   --  twice (see the body's own comment: an earlier version double-
+   --  destroyed it on every parse failure, confirmed live to abort
+   --  the process via glibc's double-free detection).
+   --
+   --  Returns the raw Thin.Fy_Document handle, not a Document --
+   --  Document is tagged, and a private-part function with a
+   --  controlling result/parameter of its own package's tagged type
+   --  is illegal unless overriding (RM 3.9.3(10)); wrapping the
+   --  handle into a Document (and, for Parse_String-like callers,
+   --  attaching an Owned_Buffer) is left to each caller, same as it
+   --  always was for Parse_File.
+   --
+   --  Declared here (not just in the body), like Collected_Errors,
+   --  so a child package building a Document from some other input
+   --  kind (a C FILE*, a file descriptor, ...) can reuse the same
+   --  Diag/error-collection/double-destroy-avoidance logic instead of
+   --  duplicating it.
+
 end Libfyaml.Documents;
