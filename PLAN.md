@@ -523,6 +523,42 @@ in a new spot:
 document" meaning. `Document_Stream` is purely additive; existing
 callers who know their input is single-document see no change at all.
 
+## Parse_Common double-free on every parse failure (fixed)
+
+**[done]** Found live while investigating source-location access
+(unrelated work), not by inspection: `Libfyaml.Documents.Parse_File`/
+`Parse_String` crashed the process on genuinely malformed input,
+instead of raising `Libfyaml.Parse_Error`.
+
+`Parse_Common`'s `Handle = Null_Fy_Document` branch destroyed `Diag`
+and then raised `Parse_Error`. Its own "defense in depth"
+`exception when others => Thin.fy_diag_destroy (Diag); raise;`
+handler then caught that same raise and destroyed `Diag` a *second*
+time — glibc's `free()` detects the corruption and aborts the
+process (confirmed live: `double free detected in tcache 2`) before
+`Parse_Error` ever reaches the caller. This hit every single call to
+`Parse_File`/`Parse_String` on malformed input, unconditionally.
+
+**Why no existing test caught this:** `test_streams.adb`'s
+`Parse_Error` checks go through `Libfyaml.Documents.Streams`, a
+different code path with a different (and, confirmed separately,
+correct) `Diag` lifecycle — one `Diag` kept alive for a whole
+stream, destroyed once in `Finalize`, never per-call.
+`test_quickstart.adb`'s `Parse_Error` handler exists but is only ever
+reached with valid input in practice. Nothing exercised
+`Parse_File`/`Parse_String` actually failing to parse until this.
+
+**Fix:** stop destroying `Diag` on the failure branch itself; let the
+single `exception when others` handler be the *only* place `Diag` is
+destroyed on any failure path (it already ran on every path via
+`raise`/re-raise, so this removes the duplicate rather than adding a
+new one). Covered by `test/test_parse_errors.adb`: both
+`Parse_File` and `Parse_String` on malformed input, back-to-back
+independent failures (confirming no per-call state carries over,
+since `Parse_Common` creates and destroys a fresh `Diag` each call —
+unlike `Document_Stream`), and successful parsing afterward. All
+confirmed leak- and error-free under valgrind.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or

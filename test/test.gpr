@@ -9,7 +9,7 @@ project Test is
    for Main use
      ("test_quickstart.adb", "test_sequence.adb", "test_scalars.adb",
       "test_navigate.adb", "test_streams.adb", "test_mutate.adb",
-      "test_anchors.adb");
+      "test_anchors.adb", "test_parse_errors.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use ("-gnat2012", "-gnatwa", "-gnata", "-g");

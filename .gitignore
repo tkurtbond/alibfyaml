@@ -8,6 +8,7 @@ test/test_navigate
 test/test_streams
 test/test_mutate
 test/test_anchors
+test/test_parse_errors
 
 
 *~

@@ -50,7 +50,15 @@ package body Libfyaml.Documents is
             declare
                Text : constant String := Collected_Errors (Diag);
             begin
-               Thin.fy_diag_destroy (Diag);
+               --  Diag is NOT destroyed here: raising below is itself
+               --  "anything else above" from the exception handler's
+               --  point of view, so destroying it on this path too was
+               --  a double fy_diag_destroy call on every single parse
+               --  failure (confirmed live: glibc's free() detects the
+               --  corruption and aborts the process rather than
+               --  Parse_Error ever reaching the caller). The handler
+               --  below is the only place Diag is destroyed on any
+               --  failure path now, exactly once.
                if Text'Length > 0 then
                   raise Libfyaml.Parse_Error with Text;
                else
@@ -63,11 +71,11 @@ package body Libfyaml.Documents is
                            with Handle => Handle, Owned_Buffer => <>);
       end;
    exception
-      --  Defense in depth: Build is a plain Interfaces.C import call and
-      --  isn't expected to raise an Ada exception under normal operation,
-      --  but if it (or anything else above) ever did, Diag would
-      --  otherwise leak -- nothing between its creation and the two
-      --  fy_diag_destroy calls above is guarded.
+      --  Reached both by a genuine parse failure (Parse_Error raised
+      --  just above) and, defense in depth, if Build itself ever
+      --  raised for some other reason: either way Diag has not been
+      --  destroyed yet on this path, so there is exactly one
+      --  fy_diag_destroy call for it here.
       when others =>
          Thin.fy_diag_destroy (Diag);
          raise;
