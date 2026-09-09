@@ -55,28 +55,24 @@ package Libfyaml.Documents is
    --  "/server") with N, following libfyaml's fy_node_insert merge rules
    --  (a scalar overwrites the target; a sequence/mapping N is appended
    --  into an existing sequence/mapping target rather than replacing it
-   --  outright). N is always consumed by this call -- libfyaml
-   --  unconditionally unrefs it, on both success and failure:
+   --  outright). N is always consumed by this call -- libfyaml's header
+   --  is explicit that the node is unconditionally unref'ed, on both
+   --  success and failure, and freed outright if that drops its
+   --  reference count to zero. A freshly-built N (Create_Scalar /
+   --  _Sequence / _Mapping, not yet attached anywhere else) has no
+   --  other reference, so this applies on success just as much as on
+   --  failure -- confirmed live with valgrind: an earlier version of
+   --  this binding only nulled N out on failure, and a "successful"
+   --  merge left N pointing at memory libfyaml had already freed
+   --  (masked without valgrind because the freed bytes happened to
+   --  still look plausible).
    --
-   --  * On success, N remains Is_Valid and safe to touch, but its
-   --    *content* may no longer be what you built: confirmed for both
-   --    the merge case (a sequence/mapping N's items/pairs are moved
-   --    into an existing sequence/mapping target, leaving N itself
-   --    behind empty) and, more surprisingly, the plain-overwrite case
-   --    (replacing an existing scalar with another scalar N can leave N
-   --    no longer reading back its own pre-call text, even though the
-   --    right value ends up attached at Path). This is libfyaml's own
-   --    fy_node_insert behavior, not something this binding changes or
-   --    can predict node-kind-by-node-kind. Never assume N still holds
-   --    what it held before the call; re-fetch from Path via
-   --    Libfyaml.Nodes.By_Path instead if you need the attached result.
-   --  * On failure (Program_Error raised), N had nothing else
-   --    referencing it, so libfyaml frees it outright -- a real
-   --    use-after-free hazard if left unaddressed. This binding sets N
-   --    to Nodes.Null_Node before the exception propagates specifically
-   --    to close that hazard: any further use of N after a caught
-   --    Program_Error fails a precondition (with -gnata enabled) instead
-   --    of touching freed memory.
+   --  This binding therefore always sets N to Nodes.Null_Node before
+   --  returning or raising, regardless of Status: any further use of N
+   --  after calling Insert_At fails a precondition (with -gnata
+   --  enabled) instead of touching freed memory. If you need the
+   --  attached result, re-fetch it from Path via Libfyaml.Nodes.By_Path
+   --  -- never assume N itself still holds anything.
 
    function Create_Scalar (Doc : in out Document; Value : String) return Nodes.Node;
    --  Build a new scalar node holding a copy of Value. The node is not

@@ -127,17 +127,20 @@ package body Libfyaml.Documents is
       Status := Thin.fy_document_insert_at
         (Doc.Handle, C_Path, C.size_t (Path'Length), Nodes.Raw (N));
       CS.Free (C_Path);
+      --  fy_document_insert_at's header is explicit: "in any case the
+      --  fyn node will be unref'ed ... if the reference is 0 the node
+      --  will be freed" -- that's unconditional, not just on failure.
+      --  A freshly-built N (Create_Scalar/_Sequence/_Mapping) has no
+      --  other reference, so it is freed on success too. Null out N
+      --  in both cases before doing anything else, so a caller can't
+      --  go on to touch what libfyaml just freed -- confirmed live
+      --  with valgrind: without this, reading N after a *successful*
+      --  merge was an invalid read of already-freed memory that
+      --  happened to still hold old bytes, silently returning a
+      --  plausible-looking (but freed) result instead of failing
+      --  loudly.
+      N := Nodes.Null_Node;
       if Status /= 0 then
-         --  fy_document_insert_at's header is explicit: on failure the
-         --  node passed in has nothing else referencing it, so libfyaml
-         --  frees it outright ("in any case the fyn node will be
-         --  unref'ed ... if the operation fails, and the reference is 0
-         --  the node will be freed"). Null out N before raising so a
-         --  caller catching Program_Error can't go on to touch what is
-         --  now freed memory -- confirmed live: Scalar_Value on a
-         --  freshly-freed node silently returned "" instead of its real
-         --  content, rather than failing loudly.
-         N := Nodes.Null_Node;
          raise Program_Error with "fy_document_insert_at failed for path """ & Path & '"';
       end if;
    end Insert_At;
