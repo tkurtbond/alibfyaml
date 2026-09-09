@@ -111,7 +111,7 @@ package body Libfyaml.Documents is
       end if;
    end Set_Root;
 
-   procedure Insert_At (Doc : in out Document; Path : String; N : Nodes.Node) is
+   procedure Insert_At (Doc : in out Document; Path : String; N : in out Nodes.Node) is
       C_Path : CS.chars_ptr := CS.New_String (Path);
       Status : C.int;
    begin
@@ -119,6 +119,16 @@ package body Libfyaml.Documents is
         (Doc.Handle, C_Path, C.size_t (Path'Length), Nodes.Raw (N));
       CS.Free (C_Path);
       if Status /= 0 then
+         --  fy_document_insert_at's header is explicit: on failure the
+         --  node passed in has nothing else referencing it, so libfyaml
+         --  frees it outright ("in any case the fyn node will be
+         --  unref'ed ... if the operation fails, and the reference is 0
+         --  the node will be freed"). Null out N before raising so a
+         --  caller catching Program_Error can't go on to touch what is
+         --  now freed memory -- confirmed live: Scalar_Value on a
+         --  freshly-freed node silently returned "" instead of its real
+         --  content, rather than failing loudly.
+         N := Nodes.Null_Node;
          raise Program_Error with "fy_document_insert_at failed for path """ & Path & '"';
       end if;
    end Insert_At;

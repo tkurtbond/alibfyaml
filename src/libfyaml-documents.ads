@@ -47,9 +47,33 @@ package Libfyaml.Documents is
    --  Make N (typically freshly built via Create_Scalar / _Sequence /
    --  _Mapping below) the document's root node.
 
-   procedure Insert_At (Doc : in out Document; Path : String; N : Nodes.Node);
+   procedure Insert_At (Doc : in out Document; Path : String; N : in out Nodes.Node);
    --  Insert/replace the node at Path (libfyaml native path syntax, e.g.
-   --  "/server") with N.
+   --  "/server") with N, following libfyaml's fy_node_insert merge rules
+   --  (a scalar overwrites the target; a sequence/mapping N is appended
+   --  into an existing sequence/mapping target rather than replacing it
+   --  outright). N is always consumed by this call -- libfyaml
+   --  unconditionally unrefs it, on both success and failure:
+   --
+   --  * On success, N remains Is_Valid and safe to touch, but its
+   --    *content* may no longer be what you built: confirmed for both
+   --    the merge case (a sequence/mapping N's items/pairs are moved
+   --    into an existing sequence/mapping target, leaving N itself
+   --    behind empty) and, more surprisingly, the plain-overwrite case
+   --    (replacing an existing scalar with another scalar N can leave N
+   --    no longer reading back its own pre-call text, even though the
+   --    right value ends up attached at Path). This is libfyaml's own
+   --    fy_node_insert behavior, not something this binding changes or
+   --    can predict node-kind-by-node-kind. Never assume N still holds
+   --    what it held before the call; re-fetch from Path via
+   --    Libfyaml.Nodes.By_Path instead if you need the attached result.
+   --  * On failure (Program_Error raised), N had nothing else
+   --    referencing it, so libfyaml frees it outright -- a real
+   --    use-after-free hazard if left unaddressed. This binding sets N
+   --    to Nodes.Null_Node before the exception propagates specifically
+   --    to close that hazard: any further use of N after a caught
+   --    Program_Error fails a precondition (with -gnata enabled) instead
+   --    of touching freed memory.
 
    function Create_Scalar (Doc : in out Document; Value : String) return Nodes.Node;
    --  Build a new scalar node holding a copy of Value. The node is not

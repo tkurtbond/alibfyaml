@@ -19,13 +19,15 @@ to provide: the project's own `.gpr` files never enabled `-gnata`, so those
 contracts compiled away to nothing (confirmed to produce three different kinds
 of silent misbehavior, including an unhandled crash, on the exact same
 invalid input); and `Document_Stream` permanently misreported every document
-after the first parse error, confirmed live. **Both are now fixed** (see
-their entries in §1 below for what changed, including a correction to my own
-first write-up: full stream *resumption* past a bad document turned out to
-be blocked by libfyaml itself, not by anything in this binding — the fix
-makes the failure honest, not recoverable). The remaining findings below
-(`Insert_At`'s node-consuming failure path, and the test-coverage/doc-nit
-items) are still open.
+after the first parse error, confirmed live. **All three of the correctness findings in §1 are now fixed** (see
+their entries below for what changed, including two corrections to my own
+first write-up along the way: full `Document_Stream` *resumption* past a bad
+document turned out to be blocked by libfyaml itself, not fixable from this
+binding — the fix makes the failure honest, not recoverable; and
+`Insert_At`'s node-draining turned out to reach the plain scalar-overwrite
+case too, not just sequence/mapping merges as originally scoped). The
+remaining findings — API-design nits, test-coverage gaps, and doc
+cross-references — are still open.
 
 ## 1. Correctness & FFI/memory safety
 
@@ -129,6 +131,33 @@ items) are still open.
   resume-after-error test case this would have caught (see §3, H1).
 
 ### src/libfyaml-documents.adb:114-124 — `Insert_At` can leave the caller holding a dangling `Node` on the failure path
+- **Status**: fixed, and widened along the way. `Insert_At`'s `N` parameter
+  is now `in out`; on failure it's set to `Nodes.Null_Node` before
+  `Program_Error` propagates, so a caught failure can never leave the
+  caller touching freed memory — confirmed live before the fix
+  (`Scalar_Value` on the freed node silently returned `""` instead of its
+  real content instead of failing loudly) and confirmed after (the same
+  scenario now reports `Is_Valid = False`, and with the `-gnata` fix from
+  earlier, any further precondition-checked use of it raises
+  `Assertion_Error` instead of touching freed memory).
+
+  Empirically probing the *success* path to decide the fix's scope turned
+  up something broader than originally scoped here: `N`'s content can be
+  silently detached from what ends up attached at `Path` even on success —
+  not only for the sequence/mapping-merge case this entry originally
+  described, but for a plain scalar-overwrites-scalar replacement too
+  (confirmed: replacing an existing scalar left `N.Scalar_Value` no longer
+  reading back what was built, even though the right value was correctly
+  attached at `Path`). `N` is *not* nulled out on success, though — unlike
+  the failure path, the underlying node object is genuinely still alive
+  there (`Is_Valid` stays true, confirmed no crash/corruption touching it),
+  just possibly emptied; forcing it to `Null_Node` would be inaccurate for
+  the (also real, and tested) case where `N` is attached outright with no
+  merge involved. The doc comment on `Insert_At` states this precisely: on
+  success, `N` stays valid and safe to touch, but never assume it still
+  holds what it held before the call — re-fetch via `By_Path` instead. A
+  new `test/test_mutate.adb` pins down all three outcomes (attach, merge,
+  and the failure/null case) with `Check`-style assertions.
 - **Severity**: major
 - **Scenario**: libfyaml's own header for `fy_document_insert_at` is
   explicit: "Note that in any case the fyn node will be unref'ed. So if the
@@ -185,6 +214,13 @@ items) are still open.
   (N) is (Kind (N) = Scalar_Node)`.
 
 ### src/libfyaml-documents.ads:46-57 — node-consuming semantics aren't documented for any of the tree-mutation entry points
+- **Status**: partially fixed. `Insert_At` now carries a full ownership
+  note (see its finding above). `Set_Root`/`Append`/`Append_Pair` are
+  still undocumented on this point — left open, since their C headers (per
+  the research behind the `Insert_At` fix) don't document any unref of
+  their node arguments the way `fy_document_insert_at` does, so there's
+  reason to believe they're simpler/safer, but that's not yet confirmed
+  the way `Insert_At` now is.
 - **Severity**: minor
 - **Scenario**: as found in §1 (`Insert_At`), libfyaml has specific,
   per-function ownership-transfer rules for node arguments passed into

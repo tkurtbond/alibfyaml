@@ -44,7 +44,10 @@ begin
       --  already present -- and examples/config.yaml already has a
       --  server.timeout entry.
       declare
-         Patch : constant Nod.Node := Doc.Create_Mapping (D);
+         --  Not constant: Insert_At takes N as "in out" and nulls it out
+         --  if the call fails, since libfyaml frees a rejected node
+         --  outright (see the doc comment on Insert_At).
+         Patch : Nod.Node := Doc.Create_Mapping (D);
       begin
          Timeout := Doc.Create_Scalar (D, "45");
          Patch.Append_Pair (Doc.Create_Scalar (D, "timeout"), Timeout);

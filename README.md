@@ -50,8 +50,9 @@ It intentionally does **not** cover:
   `examples/quick-start.c`), `test_sequence.adb`, `test_scalars.adb`
   (exhaustive coverage of the typed scalar accessors below),
   `test_navigate.adb` (a worked example of tree navigation, not a
-  pass/fail test), and `test_streams.adb` (multi-document streaming,
-  including a mid-stream parse error).
+  pass/fail test), `test_streams.adb` (multi-document streaming,
+  including a mid-stream parse error), and `test_mutate.adb`
+  (`Insert_At`'s success and failure outcomes for the node passed in).
 
 ## Typed scalar accessors
 
