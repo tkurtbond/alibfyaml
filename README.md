@@ -118,7 +118,18 @@ the single-document `fy_document_build_from_string`/`_file` that
 `Parse_String`/`Parse_File` use. A malformed document partway through the
 stream raises `Libfyaml.Parse_Error`, distinct from `Has_Next` returning
 `False` at a clean end of stream. See `PLAN.md` for the full design,
-including two lifetime bugs found and fixed while implementing this.
+including lifetime bugs found and fixed while implementing this.
+
+**A stream does not recover from a parse error.** libfyaml's streaming
+parser cannot resync past a malformed document to reach further ones in
+the same stream — confirmed directly against libfyaml, including that an
+explicit parser reset does not restore usable input state. After the
+first `Libfyaml.Parse_Error`, treat the `Document_Stream` as exhausted:
+`Has_Next` reports a clean `False` rather than raising again (earlier
+versions of this binding raised `Libfyaml.Parse_Error` a second time here
+too, quoting the first error's now-stale message — fixed), but it will
+not find any further documents even if the underlying input textually
+contains more.
 
 ## Building
 

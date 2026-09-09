@@ -13,18 +13,31 @@ against this binding and a local libfyaml build (see "Evidence" notes).
 The binding is careful and mostly correct where it matters most — buffer
 lifetime across the Ada/C boundary (the exact area PLAN.md records two past
 bugs in) is handled right in every path reviewed, and the hand-rolled numeric
-extension parser is sound on everything the test suite drives it with. But
-two gaps undercut the safety story the API's `Pre =>` contracts are supposed
-to provide: the project's own `.gpr` files never enable `-gnata`, so those
-contracts compile away to nothing (confirmed to produce three different kinds
+extension parser is sound on everything the test suite drives it with. Two
+gaps undercut the safety story the API's `Pre =>` contracts are supposed
+to provide: the project's own `.gpr` files never enabled `-gnata`, so those
+contracts compiled away to nothing (confirmed to produce three different kinds
 of silent misbehavior, including an unhandled crash, on the exact same
-invalid input); and `Document_Stream` permanently misreports every document
-after the first parse error, confirmed live. Both are currently invisible to
-the test suite and undocumented in the README.
+invalid input); and `Document_Stream` permanently misreported every document
+after the first parse error, confirmed live. **Both are now fixed** (see
+their entries in §1 below for what changed, including a correction to my own
+first write-up: full stream *resumption* past a bad document turned out to
+be blocked by libfyaml itself, not by anything in this binding — the fix
+makes the failure honest, not recoverable). The remaining findings below
+(`Insert_At`'s node-consuming failure path, and the test-coverage/doc-nit
+items) are still open.
 
 ## 1. Correctness & FFI/memory safety
 
 ### src/libfyaml_ada.gpr:11-12, test/test.gpr:15 — `Pre =>` contracts are silently unenforced; demonstrated three divergent unsafe behaviors on the same invalid input
+- **Status**: fixed. `-gnata` added to `Default_Switches ("Ada")` in both
+  `libfyaml_ada.gpr` and `test/test.gpr`, with a comment on each pointing at
+  the other. The full test suite (all five `test/*.adb` programs) still
+  passes cleanly with assertions on, confirming no latent precondition
+  violation elsewhere in `src/` was hiding behind this gap. The README's
+  Building section didn't need a change: the library itself now enables
+  `-gnata`, so a consumer building `libfyaml_ada.gpr` normally gets the
+  contracts for free rather than needing to know to add the switch.
 - **Severity**: blocker
 - **Scenario**: `Libfyaml.Nodes` declares `Pre => Is_Valid (N)` (and further
   shape preconditions) on nearly every primitive — `Kind`, `Scalar_Value`,
@@ -59,6 +72,29 @@ the test suite and undocumented in the README.
   `-gnata`-less build of the library know the contracts aren't load-bearing.
 
 ### src/libfyaml-documents-streams.adb:92-108 — a `Document_Stream` permanently misreports every later document as a parse error, after any one parse error
+- **Status**: fixed, with a corrected scope worth recording. `Fetch` now
+  swaps in a brand new `Diag` (via a new `fy_parser_set_diag` binding)
+  whenever it raises `Parse_Error`, so the sticky `fy_diag_got_error` flag
+  and the cumulative `fy_diag_errors_iterate` list can never again leak
+  into a later, unrelated `Fetch` call. Verified live: `Has_Next` after the
+  error now returns a clean `False` instead of raising `Parse_Error` again.
+
+  However, chasing this further (via `fy_parser_reset`, tried directly
+  against the C API) turned up that the premise "the stream can be resumed
+  past the bad document" in my original write-up below was wrong:
+  libfyaml's streaming parser cannot resync mid-stream after a malformed
+  document at all — even an explicit `fy_parser_reset` leaves it reporting
+  "out of tokens and failed to produce anymore," not usable input state.
+  So a well-formed document *after* a malformed one in the same stream is
+  genuinely unreachable, independent of this bug; that's an upstream
+  libfyaml streaming-API limitation, not something fixable from this
+  binding. The fix's actual, narrower scope: a `Document_Stream` no longer
+  lies about *why* it stopped (a stale duplicate error instead of an
+  honest clean end) — it does not gain the ability to skip a bad document
+  and keep going. `test_streams.adb`, `libfyaml-documents-streams.ads`, and
+  the README's "Multi-document YAML streams" section were all updated to
+  state this limitation plainly instead of the original, incorrect
+  "distinct from a clean end of stream" framing implying resumability.
 - **Severity**: major
 - **Scenario**: `Fetch` treats `Fyd = Null_Fy_Document and then
   fy_diag_got_error (Stream.Diag)` as "this NULL means a parse error, not a
@@ -162,6 +198,11 @@ the test suite and undocumented in the README.
 ## 3. Test coverage & edge cases
 
 ### test/test_streams.adb — no test resumes a `Document_Stream` after a `Parse_Error`
+- **Status**: fixed. The bad-stream test block now includes a third,
+  well-formed document after the malformed one and calls `Has_Next` again
+  after catching the first `Parse_Error`, asserting it returns `False`
+  (clean end) rather than raising a second time. All `test_streams.adb`
+  checks pass.
 - **Severity**: major
 - **Scenario**: the existing "bad stream" test stops immediately after
   asserting the first `Parse_Error` fires; it never calls `Has_Next`/`Next`
@@ -173,6 +214,7 @@ the test suite and undocumented in the README.
   (today: another spurious `Parse_Error`, quoting stale text).
 
 ### test/test.gpr, libfyaml_ada.gpr — no build anywhere enables `-gnata`
+- **Status**: fixed alongside §1's blocker finding — see there.
 - **Severity**: minor
 - **Scenario**: ties directly to §1's blocker finding — with `-gnata` never
   enabled in either project file, the extensive `Pre =>` contracts across
@@ -224,6 +266,13 @@ the test suite and undocumented in the README.
 ## 4. Docs & spec accuracy
 
 ### README.md:91-121 "Multi-document YAML streams" — doesn't document the post-error stream-poisoning behavior
+- **Status**: fixed. The section now has an explicit "A stream does not
+  recover from a parse error" paragraph, stating both what was fixed
+  (`Has_Next` no longer raises a second, stale `Parse_Error`) and what
+  wasn't and isn't fixable from this binding (a well-formed document past
+  a malformed one in the same stream is genuinely unreachable — a
+  libfyaml streaming-API limitation, confirmed directly against the C
+  library).
 - **Severity**: major
 - **Scenario**: the section states a parse error "raises
   `Libfyaml.Parse_Error`, distinct from `Has_Next` returning `False` at a
@@ -236,6 +285,9 @@ the test suite and undocumented in the README.
   abandoned after its first `Parse_Error`.
 
 ### README.md "Building" — doesn't mention `-gnata` at all
+- **Status**: fixed alongside §1's blocker finding — see there (resolved by
+  enabling `-gnata` in the shipped `.gpr`, so no README change was needed
+  beyond that, as this finding's own Fix note anticipated).
 - **Severity**: major
 - **Scenario**: given how much of `Libfyaml.Nodes`'s documented safety
   contract rests on `Pre =>` clauses, and given neither project file turns

@@ -44,6 +44,15 @@ package Libfyaml.Documents.Streams is
    --  stream: this may actually read the next document ahead of time,
    --  caching it for Next. May raise Libfyaml.Parse_Error itself, if
    --  that read-ahead is what encounters a malformed document.
+   --
+   --  Note: libfyaml's streaming parser cannot resync past a malformed
+   --  document to reach further ones in the same stream. So after a
+   --  Parse_Error (from this call or from Next), a further Has_Next call
+   --  does not raise again (that part is fixed: it used to, misreporting
+   --  the *next* document as failing too) but also does not find any
+   --  more documents even if the underlying input textually contains
+   --  more -- it returns False, same as a genuine clean end of stream.
+   --  Treat a Document_Stream as exhausted after its first Parse_Error.
 
    function Next (Stream : in out Document_Stream) return Document
      with Pre => Has_Next (Stream);
@@ -53,7 +62,10 @@ package Libfyaml.Documents.Streams is
    --  correctness depends on). Raises Libfyaml.Parse_Error if that
    --  document fails to parse -- distinct from Has_Next returning
    --  False (clean end of stream): a parse error partway through the
-   --  stream is not silently treated as "no more documents".
+   --  stream is not silently treated as "no more documents". See the
+   --  note on Has_Next above, though: this only distinguishes the
+   --  *first* parse error in a stream from a clean end -- once it has
+   --  happened, the stream has nothing further to give either way.
 
 private
 
