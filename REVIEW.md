@@ -19,15 +19,20 @@ to provide: the project's own `.gpr` files never enabled `-gnata`, so those
 contracts compiled away to nothing (confirmed to produce three different kinds
 of silent misbehavior, including an unhandled crash, on the exact same
 invalid input); and `Document_Stream` permanently misreported every document
-after the first parse error, confirmed live. **All three of the correctness findings in §1 are now fixed** (see
-their entries below for what changed, including two corrections to my own
-first write-up along the way: full `Document_Stream` *resumption* past a bad
-document turned out to be blocked by libfyaml itself, not fixable from this
-binding — the fix makes the failure honest, not recoverable; and
-`Insert_At`'s node-draining turned out to reach the plain scalar-overwrite
-case too, not just sequence/mapping merges as originally scoped). The
-remaining findings — API-design nits, test-coverage gaps, and doc
-cross-references — are still open.
+after the first parse error, confirmed live.
+
+**Every finding in this review is now fixed** — the three correctness
+findings in §1, and every API-design/test-coverage/docs finding below them.
+See each entry for what changed, including three corrections made to my own
+first write-up along the way as the fixes were verified empirically rather
+than assumed from the C headers alone: full `Document_Stream` *resumption*
+past a bad document turned out to be blocked by libfyaml itself, not
+fixable from this binding — the fix makes the failure honest, not
+recoverable; `Insert_At`'s node-draining turned out to reach the plain
+scalar-overwrite case too, not just sequence/mapping merges as originally
+scoped; and `Set_Root`/`Append`/`Append_Pair` were confirmed (not just
+assumed from their headers) to leave their node arguments valid and intact,
+unlike `Insert_At`.
 
 ## 1. Correctness & FFI/memory safety
 
@@ -179,6 +184,8 @@ cross-references — are still open.
   retry-on-failure pattern this would silently break.
 
 ### src/libfyaml-documents.adb:34-63 — `Diag` could leak if `Build` itself raised (defense-in-depth note)
+- **Status**: fixed. `Parse_Common` now has an `exception when others =>
+  fy_diag_destroy (Diag); raise;` handler around the whole body.
 - **Severity**: nit
 - **Scenario**: `Parse_Common` has no exception handler around the `Build
   (Cfg'Access)` call; if it propagated an Ada exception, `Diag` would never
@@ -189,6 +196,9 @@ cross-references — are still open.
   (Diag); raise;` would close the gap for free if ever touched.
 
 ### src/libfyaml-nodes.ads:104-106, .adb:343-348 — `Item` silently returns `Null_Node` outside its documented range
+- **Status**: fixed. Doc comment reworded to state the actual behavior
+  (`Null_Node` on an out-of-range `Index`, libfyaml's own behavior passed
+  through) instead of a range that was never enforced.
 - **Severity**: minor
 - **Scenario**: the doc comment says "Index must be in 1 .. Length (N)" but
   nothing enforces or documents what happens otherwise. In practice it's
@@ -205,6 +215,9 @@ cross-references — are still open.
 ## 2. API design & Ada idioms
 
 ### src/libfyaml-nodes.adb:197-204 — `Is_Scalar`/`Is_Sequence`/`Is_Mapping`/`Kind` each make an independent C call
+- **Status**: fixed. All three are now expressed in terms of `Kind`
+  (`Is_Scalar (N) is (Kind (N) = Scalar_Node)`, etc.), one
+  `fy_node_get_type` call instead of two.
 - **Severity**: nit
 - **Scenario**: each predicate calls `Thin.fy_node_get_type` separately
   rather than being expressed in terms of `Kind`, or vice versa. No
@@ -214,13 +227,11 @@ cross-references — are still open.
   (N) is (Kind (N) = Scalar_Node)`.
 
 ### src/libfyaml-documents.ads:46-57 — node-consuming semantics aren't documented for any of the tree-mutation entry points
-- **Status**: partially fixed. `Insert_At` now carries a full ownership
-  note (see its finding above). `Set_Root`/`Append`/`Append_Pair` are
-  still undocumented on this point — left open, since their C headers (per
-  the research behind the `Insert_At` fix) don't document any unref of
-  their node arguments the way `fy_document_insert_at` does, so there's
-  reason to believe they're simpler/safer, but that's not yet confirmed
-  the way `Insert_At` now is.
+- **Status**: fixed. `Set_Root`, `Append`, and `Append_Pair` now each carry
+  a one-line ownership note, confirmed empirically (not just from the
+  header text): all three leave their node argument(s) valid and reading
+  exactly what was built, unlike `Insert_At`. `Insert_At` itself was
+  already covered by its own fix above.
 - **Severity**: minor
 - **Scenario**: as found in §1 (`Insert_At`), libfyaml has specific,
   per-function ownership-transfer rules for node arguments passed into
@@ -262,6 +273,12 @@ cross-references — are still open.
   for the library project too.
 
 ### test/test_navigate.adb — no pass/fail assertions
+- **Status**: fixed. A "Regression checks" section (`Check`/`Failures`,
+  same pattern as the other tests) was added at the end, spot-checking a
+  handful of the values the walkthrough above already prints, at each
+  depth demonstrated. The walkthrough itself is untouched, so it still
+  reads as a worked example rather than being restructured into
+  assertions throughout.
 - **Severity**: minor
 - **Scenario**: by design (per README: "a worked example of tree
   navigation, not a pass/fail test") it only prints output; a regression
@@ -272,6 +289,9 @@ cross-references — are still open.
   file in CI.
 
 ### test/scalars.yaml, test_scalars.adb — `Long_Long_Integer_Value`/`Long_Float_Value` overflow paths untested
+- **Status**: fixed. `scalars.yaml` gained `huge_int` (exceeds even 64-bit)
+  and `huge_float` (`1.0e400`, exceeds `Long_Float`), each asserted to
+  raise `Data_Error` from the corresponding widest accessor.
 - **Severity**: nit
 - **Scenario**: the suite tests `Integer_Value`/`Float_Value` overflow
   (`big_int`, `float_overflow`) on values chosen to overflow only the
@@ -284,6 +304,8 @@ cross-references — are still open.
   assert `Long_Long_Integer_Value` raises `Data_Error`.
 
 ### test/scalars.yaml — no sign+prefix combination tested
+- **Status**: fixed. `scalars.yaml` gained `int_hex_neg: -0x1A`, asserted
+  to equal `-26`.
 - **Severity**: nit
 - **Scenario**: `int_hex`/`int_oct`/`int_bin` are all tested unsigned only;
   `int_neg` is tested only in plain decimal. `Strip_Sign`/`Integer_Literal_Text`
@@ -292,6 +314,10 @@ cross-references — are still open.
 - **Fix**: add e.g. `int_hex_neg: -0x1A` to `scalars.yaml` and assert.
 
 ### test/streams.yaml, test_streams.adb — no empty-stream or exactly-one-document-stream test
+- **Status**: fixed. Two new blocks added to `test_streams.adb`: an
+  `Open_String ("")` stream asserted to report `Has_Next = False`
+  immediately, and a single-document `Open_String` stream asserted to
+  yield exactly one document with the right content.
 - **Severity**: minor
 - **Scenario**: all `Document_Stream` tests use 2- or 3-document input.
   The boundary between "no documents" (`Has_Next` false immediately) and
@@ -335,12 +361,17 @@ cross-references — are still open.
   needed beyond that).
 
 ### src/libfyaml-documents.ads:50-52 `Insert_At` — doesn't mention the node-consuming semantics found in §1
+- **Status**: fixed alongside §1's `Insert_At` finding — see there.
 - **Severity**: minor
 - **Scenario**: see §1's `Insert_At` finding — the doc comment should carry
   the same ownership warning libfyaml's own header states plainly.
 - **Fix**: covered by §1's fix.
 
 ### 000-todo.org:47-59 — the open zero-copy question about mapping-key lifetime is answerable now, and the answer is "safe"
+- **Status**: fixed. `000-todo.org` updated in place: both the mapping-key
+  and the `Insert_At`-path sub-questions marked RESOLVED (both safe to
+  free immediately, for the same reason), with a cross-reference to
+  `Insert_At`'s real (different) lifetime hazard and its fix.
 - **Severity**: nit (informational, not a defect)
 - **Scenario**: the TODO asks whether `Value`'s (and `Has_Key`/`Required`'s)
   immediate `CS.Free (C_Key)` after

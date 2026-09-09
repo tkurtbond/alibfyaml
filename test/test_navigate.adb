@@ -1,5 +1,10 @@
---  A worked example, not a pass/fail test: shows how to walk an
---  alibfyaml document tree and read out typed values.
+--  Primarily a worked example, not a pass/fail test: shows how to walk
+--  an alibfyaml document tree and read out typed values. The output is
+--  meant to be read as documentation of the techniques below -- but a
+--  final "Regression checks" section (Check/Failures, same pattern as
+--  the other tests) spot-checks a handful of the values it demonstrates,
+--  so a regression here fails a test run rather than only being visible
+--  to someone diffing console output by eye.
 --
 --  Two complementary techniques, both against test/navigate.yaml:
 --
@@ -27,6 +32,23 @@ procedure Test_Navigate is
 
    package Doc renames Libfyaml.Documents;
    package Nod renames Libfyaml.Nodes;
+
+   --  The walkthrough above stays exactly that -- a worked example, not
+   --  restructured into assertions, so it reads clearly as usage
+   --  documentation. This spot-checks a handful of the same values it
+   --  prints, so a regression here fails a test run instead of only
+   --  being visible to someone diffing console output by eye.
+   Failures : Natural := 0;
+
+   procedure Check (Label : String; Condition : Boolean) is
+   begin
+      if Condition then
+         Ada.Text_IO.Put_Line ("ok   - " & Label);
+      else
+         Ada.Text_IO.Put_Line ("FAIL - " & Label);
+         Failures := Failures + 1;
+      end if;
+   end Check;
 
    ---------------------------------------------------------------------
    --  1. Generic recursive walk, dispatching on node/scalar shape.
@@ -217,5 +239,36 @@ begin
             D.Root.Value ("company").String_Value ("name") & ":");
          Departments.Iterate (Visit_Department'Access);
       end;
+
+      -----------------------------------------------------------------
+      --  Regression checks: spot-check a handful of the values the
+      --  walkthrough above already printed, at each depth demonstrated
+      --  (top-level scalar, sequence, nested mapping, sequence of
+      --  mappings, and the 4-levels-deep case via both access paths).
+      -----------------------------------------------------------------
+      Ada.Text_IO.New_Line;
+      Ada.Text_IO.Put_Line ("=== Regression checks ===");
+      Check ("top-level name", D.Root.String_Value ("name") = "Sample Config");
+      Check ("top-level version", D.Root.Integer_Value ("version") = 3);
+      Check ("tags sequence: first tag",
+             D.Root.Value ("tags").Item (1).Scalar_Value = "alpha");
+      Check ("nested mapping: server.port",
+             D.Root.Value ("server").Integer_Value ("port") = 8080);
+      Check ("sequence of mappings: endpoints (1).name",
+             D.Root.Value ("endpoints").Item (1).String_Value ("name") = "health");
+      Check ("4 levels deep, chained Value/Item = By_Path",
+             D.Root.Value ("company").Value ("departments").Item (1)
+               .Value ("teams").Item (1).String_Value ("lead") =
+             D.Root.By_Path ("/company/departments/0/teams/0/lead").Scalar_Value);
+      Check ("4 levels deep, expected value",
+             D.Root.By_Path ("/company/departments/0/teams/0/lead").Scalar_Value =
+             "Ada Lovelace");
+
+      Ada.Text_IO.New_Line;
+      if Failures = 0 then
+         Ada.Text_IO.Put_Line ("All checks passed.");
+      else
+         Ada.Text_IO.Put_Line (Integer'Image (Failures) & " check(s) failed.");
+      end if;
    end;
 end Test_Navigate;

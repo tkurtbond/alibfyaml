@@ -60,6 +60,15 @@ package body Libfyaml.Documents is
          return Document'(Ada.Finalization.Limited_Controlled
                            with Handle => Handle, Owned_Buffer => <>);
       end;
+   exception
+      --  Defense in depth: Build is a plain Interfaces.C import call and
+      --  isn't expected to raise an Ada exception under normal operation,
+      --  but if it (or anything else above) ever did, Diag would
+      --  otherwise leak -- nothing between its creation and the two
+      --  fy_diag_destroy calls above is guarded.
+      when others =>
+         Thin.fy_diag_destroy (Diag);
+         raise;
    end Parse_Common;
 
    function Parse_String (Text : String) return Document is

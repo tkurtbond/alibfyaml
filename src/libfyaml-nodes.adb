@@ -194,14 +194,14 @@ package body Libfyaml.Nodes is
       end case;
    end Kind;
 
-   function Is_Scalar (N : Node) return Boolean is
-     (Thin.fy_node_get_type (N.Handle) = Thin.FYNT_SCALAR);
+   --  Expressed in terms of Kind (one fy_node_get_type call) rather than
+   --  each repeating its own, to avoid a redundant FFI round-trip when a
+   --  caller checks shape via these rather than Kind directly.
+   function Is_Scalar (N : Node) return Boolean is (Kind (N) = Scalar_Node);
 
-   function Is_Sequence (N : Node) return Boolean is
-     (Thin.fy_node_get_type (N.Handle) = Thin.FYNT_SEQUENCE);
+   function Is_Sequence (N : Node) return Boolean is (Kind (N) = Sequence_Node);
 
-   function Is_Mapping (N : Node) return Boolean is
-     (Thin.fy_node_get_type (N.Handle) = Thin.FYNT_MAPPING);
+   function Is_Mapping (N : Node) return Boolean is (Kind (N) = Mapping_Node);
 
    function Scalar_Value (N : Node) return String is
       Len : aliased C.size_t;

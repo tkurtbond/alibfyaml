@@ -103,12 +103,18 @@ package Libfyaml.Nodes is
 
    function Item (N : Node; Index : Positive) return Node
      with Pre => Is_Valid (N) and then Is_Sequence (N);
-   --  1-based access to a sequence item; Index must be in 1 .. Length (N).
+   --  1-based access to a sequence item. Index is ordinarily in
+   --  1 .. Length (N); if it exceeds Length (N), this returns Null_Node
+   --  rather than raising (libfyaml's own out-of-range behavior for this
+   --  lookup, passed through as-is).
 
    procedure Append (Seq : Node; Item : Node)
      with Pre => Is_Valid (Seq) and then Is_Sequence (Seq) and then Is_Valid (Item);
    --  Append Item (typically freshly built via Libfyaml.Documents.Create_*)
-   --  to the end of the Seq sequence.
+   --  to the end of the Seq sequence. Unlike
+   --  Libfyaml.Documents.Insert_At, Item is attached outright, not
+   --  merged: fy_node_sequence_append's own header documents no unref of
+   --  it -- Item remains valid and reads back exactly what was built.
 
    procedure Iterate
      (Seq : Node; Visit : not null access procedure (Element : Node))
@@ -133,7 +139,11 @@ package Libfyaml.Nodes is
      with Pre => Is_Valid (Map) and then Is_Mapping (Map)
        and then Is_Valid (Key) and then Is_Valid (Value);
    --  Append a (Key, Value) pair, typically freshly built via
-   --  Libfyaml.Documents.Create_*, to the end of the Map mapping.
+   --  Libfyaml.Documents.Create_*, to the end of the Map mapping. Unlike
+   --  Libfyaml.Documents.Insert_At, Key and Value are attached outright,
+   --  not merged: fy_node_mapping_append's own header documents no unref
+   --  of either -- both remain valid and read back exactly what was
+   --  built.
 
    procedure Iterate
      (Map : Node; Visit : not null access procedure (Key, Value : Node))

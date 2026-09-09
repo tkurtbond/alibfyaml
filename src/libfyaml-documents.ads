@@ -45,7 +45,10 @@ package Libfyaml.Documents is
 
    procedure Set_Root (Doc : in out Document; N : Nodes.Node);
    --  Make N (typically freshly built via Create_Scalar / _Sequence /
-   --  _Mapping below) the document's root node.
+   --  _Mapping below) the document's root node. Unlike Insert_At, N is
+   --  attached outright, not merged: fy_document_set_root's own header
+   --  documents no unref of N (only that the *previous* root, if any, is
+   --  freed) -- N remains valid and reads back exactly what was built.
 
    procedure Insert_At (Doc : in out Document; Path : String; N : in out Nodes.Node);
    --  Insert/replace the node at Path (libfyaml native path syntax, e.g.

@@ -95,6 +95,38 @@ begin
    end;
 
    -----------------------------------------------------------------
+   --  Boundary: an empty stream (no documents at all) reports
+   --  Has_Next = False immediately, not an error.
+   -----------------------------------------------------------------
+   declare
+      Stream : Streams.Document_Stream := Streams.Open_String ("");
+   begin
+      Check ("Open_String ("""") has no documents", not Streams.Has_Next (Stream));
+   end;
+
+   -----------------------------------------------------------------
+   --  Boundary: a stream containing exactly one document behaves the
+   --  same as Parse_String would for that one document, then reports
+   --  a clean end.
+   -----------------------------------------------------------------
+   declare
+      Stream : Streams.Document_Stream :=
+        Streams.Open_String ("---" & ASCII.LF & "name: only" & ASCII.LF);
+      Count  : Natural := 0;
+   begin
+      while Streams.Has_Next (Stream) loop
+         Count := Count + 1;
+         declare
+            D : constant Doc.Document := Streams.Next (Stream);
+         begin
+            Check ("single-document stream: document" & Count'Image & " name",
+                   D.Root.String_Value ("name") = "only");
+         end;
+      end loop;
+      Check ("single-document stream yielded exactly 1 document", Count = 1);
+   end;
+
+   -----------------------------------------------------------------
    --  A parse error partway through a stream must raise
    --  Libfyaml.Parse_Error, not look like a clean end of stream -- and
    --  calling Has_Next *again* afterward must not raise a second, stale
