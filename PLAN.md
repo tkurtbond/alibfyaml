@@ -908,6 +908,35 @@ additions to the existing `test/config.yaml`) covering:
   reference, and whether it changes `Node`'s current pass-by-value
   cost) before committing to it, and there is no confirmed real-world
   incident yet forcing the question.
+- **`Missing_Key`/`Data_Error` carry only a bare message, not
+  `Path`/`Location`.** Confirmed by reading `libfyaml-nodes.adb`'s
+  actual `raise` statements: `Required` raises `Missing_Key with
+  "missing required key ""<Key>"""`, and every typed accessor's
+  `Data_Error` similarly carries just a `"not a valid <type>: ...""`
+  string -- neither exception carries the offending `Map`'s `Path` or
+  the scalar `Node`'s `Location`, even though the accessor raising it
+  already holds exactly the `Node`/`Map` needed to compute either.
+  Today a caller who wants that context fetches and combines it by
+  hand, exactly as `test/example_missing_field.adb` demonstrates
+  (`Path (Server)` alongside the caught `Missing_Key`'s own message).
+  A sibling binding to the same C library for a garbage-collected host
+  (`slibfyaml`, Chicken Scheme, `~/Repos/Scheme/Chicken/5/slibfyaml`)
+  decided to attach this automatically instead: its `missing-key`/
+  `data` conditions carry `'path` (and `'line`/`'column` when
+  available) as structured fields, populated by the same internal
+  helper every typed accessor already funnels through to raise, with
+  the message text folding the path in too (`"missing required key
+  \"host\" at /server"`) -- costing nothing extra at the raise site
+  since the node is already in hand. Ada exceptions don't carry
+  structured fields as directly as a CHICKEN condition object does
+  (an Ada equivalent would mean either widening `Message` at the raise
+  site to include `Path`/`Location` text inline, or defining dedicated
+  exception occurrence types/`Exception_Information` accessors for
+  `Missing_Key`/`Data_Error` -- the latter a real API-shape decision,
+  not just a formatting tweak). Deferred rather than decided: flagged
+  here as a possible future enhancement, not applied -- changing what
+  an already-shipped exception carries needs its own consideration,
+  not something to fold in incidentally alongside noting the idea.
 - **Should `Parse_String`/`Parse_File` warn about extra documents?**
   Now that `Document_Stream` exists as the correct tool for
   multi-document input, should the single-document functions detect
