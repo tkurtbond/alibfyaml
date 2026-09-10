@@ -881,6 +881,33 @@ additions to the existing `test/config.yaml`) covering:
   section above) — mirrors `fy_parse_load_document`'s own "call again,
   `NULL` means done" shape directly, and sidesteps needing new
   machinery for `Document`'s limited/controlled-ness.
+- **Node/Document liveness enforcement is documentation-only.** `Node`'s
+  lifetime contract ("valid as long as its owning `Document` hasn't
+  been `Finalize`d," see `Libfyaml.Nodes`' header comment) is checked
+  nowhere at runtime beyond `Is_Valid`'s null-handle test -- there is
+  no "is my owner still alive?" check, so a `Node` used after its
+  `Document` goes out of scope fails no precondition and instead reads
+  freed memory directly, the same failure shape as every lifetime bug
+  confirmed elsewhere in this file. No *confirmed* incident of this
+  specific case exists yet (unlike the three bugs above, all caught by
+  valgrind), but the gap is structural, not hypothetical. A sibling
+  binding to the same C library for a garbage-collected host
+  (`slibfyaml`, Chicken Scheme, `~/Repos/Scheme/Chicken/5/slibfyaml`)
+  decided to close the equivalent gap by giving every node handle a
+  reference to its owning document object and checking that document's
+  liveness flag on every accessor, turning the mistake into a raised
+  condition. Closing it here would need `Node` to carry a reference
+  back to its owning `Document` (it currently stores only the bare
+  `Thin.Fy_Node` handle -- see the `Node` private record in this
+  package) and a mutable liveness flag on `Document` checked by a
+  shared helper called from every `Pre => Is_Valid (N)` site, or
+  folded into `Is_Valid` itself. Deferred rather than decided: doing
+  this would change `Node` from a trivially-copyable bare-pointer
+  wrapper to one holding a reference to its `Document`, which needs
+  thinking through (aliasing/accessibility rules for that back-
+  reference, and whether it changes `Node`'s current pass-by-value
+  cost) before committing to it, and there is no confirmed real-world
+  incident yet forcing the question.
 - **Should `Parse_String`/`Parse_File` warn about extra documents?**
   Now that `Document_Stream` exists as the correct tool for
   multi-document input, should the single-document functions detect

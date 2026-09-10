@@ -36,6 +36,23 @@
 --  private part) shared between the stream and every Document drawn
 --  from it, freed only once the last holder is gone -- see PLAN.md's
 --  "Document_Stream buffer lifetime" section for the full writeup.
+--
+--  That lifetime rule is enforced by convention, not by the compiler
+--  or at runtime: Is_Valid (used as the Pre on every accessor below)
+--  only checks N against Null_Node -- it has no way to ask "is my
+--  owning Document still alive?", so a Node used after its Document's
+--  Finalize has run fails a null-handle check nowhere, and instead
+--  either reads freed memory or (per the case above) a freed buffer,
+--  same failure class as every confirmed lifetime bug this file's
+--  history is made of. A sibling binding to the same C library for a
+--  garbage-collected host (slibfyaml, targeting Chicken Scheme --
+--  ~/Repos/Scheme/Chicken/5/slibfyaml) chose to track this at runtime
+--  instead: give each node a reference to its owning document object,
+--  and check that document's own liveness flag on every accessor
+--  before touching the handle, turning this class of mistake into a
+--  raised condition instead of a silent use-after-free. See this
+--  project's own PLAN.md, "Open questions", for whether the same is
+--  worth doing here -- not pursued in this binding yet.
 
 with Libfyaml.Thin;
 
