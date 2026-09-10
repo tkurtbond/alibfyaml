@@ -584,6 +584,20 @@ package body Libfyaml.Nodes is
       return Wrap (Result);
    end By_Path;
 
+   function Path (N : Node) return String is
+      Ptr : constant CS.chars_ptr := Thin.fy_node_get_path (N.Handle);
+   begin
+      if Ptr = CS.Null_Ptr then
+         return "";
+      end if;
+      declare
+         Result : constant String := CS.Value (Ptr);
+      begin
+         Thin.C_Free (Ptr);
+         return Result;
+      end;
+   end Path;
+
    function Is_Alias (N : Node) return Boolean is
      (Is_Scalar (N) and then Thin.fy_node_get_style (N.Handle) = Thin.FYNS_ALIAS);
 

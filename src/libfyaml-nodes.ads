@@ -286,6 +286,20 @@ package Libfyaml.Nodes is
    --  Look up a descendant node by libfyaml's native path syntax, e.g.
    --  "/server/port". Returns Null_Node if the path cannot be resolved.
 
+   function Path (N : Node) return String
+     with Pre => Is_Valid (N);
+   --  N's own path address relative to the document root, in the same
+   --  syntax By_Path accepts (e.g. "/0/abilities/2") -- the inverse of
+   --  By_Path. Unlike Location below, this works on a node of any
+   --  kind, mapping/sequence included, not just scalars: a mapping
+   --  item missing a required key has no node/token to report a
+   --  Location for, but its own Path is always available and, paired
+   --  with the missing key's name, unambiguously identifies where the
+   --  problem is. The document root's own Path is "/" (confirmed
+   --  live -- see the note on Fy_Mark's neighbor, fy_node_get_path,
+   --  in Libfyaml.Thin for why this doesn't return "" instead, despite
+   --  what the C header itself claims).
+
    -----------------------------------
    --  Anchors, aliases, and tags   --
    -----------------------------------

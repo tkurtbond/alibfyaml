@@ -39,6 +39,43 @@
   internally consistent between these two error-reporting subsystems.
   Location converts to 1-indexed to match Parse_Error's convention;
   see the note on Fy_Mark in Libfyaml.Thin.
+* DONE Add structural path access (Libfyaml.Nodes.Path), separate from Location
+  Requested by ova_fmt's user: a way to identify *which* node has a
+  problem when it has no Location to report (Location is scalar-only,
+  per the item above -- useless for a MAPPING node that's simply
+  missing a required key, since there's no token/scalar for the
+  absent key to hang a position off of). Implemented as
+  Libfyaml.Nodes.Path (N : Node) return String, via fy_node_get_path
+  -- the inverse of the pre-existing By_Path, in the same "/a/0/b"
+  syntax. Deliberately independent of Location, per the user: a
+  caller can use either alone or both together (see
+  test/example_missing_field.adb for a worked "both at once" case).
+
+  Unlike fy_node_get_scalar_token (NULL for a non-scalar node), Path
+  works on a node of ANY kind -- confirmed live against a mapping node
+  in test/test_path.adb -- so it has no Has_Path-style guard the way
+  Location needs Has_Location; it's just always callable on any valid
+  Node.
+
+  One real header-vs-reality mismatch found and confirmed live, same
+  spirit as the Location item's FYPCF_CREATE_MARKERS/
+  fy_node_get_start_token corrections above: the C header claims
+  fy_node_get_path "returns... NULL if fyn is the root," but the
+  document root actually returns the real string "/", not NULL --
+  confirmed against navigate.yaml's own root node. Path still guards
+  for a NULL return defensively (falling back to "") in case that
+  claim holds in some other, unconfirmed case, but documents "/" as
+  the actual observed root value rather than assuming "" from the
+  header text alone.
+
+  Covered by test/test_path.adb (root, a top-level scalar, a sequence
+  element, a mapping node specifically -- the case Location can't
+  cover -- 4-level-deep nesting, and a By_Path(Path(N)) = N
+  round-trip) and test/example_missing_field.adb (a worked example:
+  Location-only via a nearby sibling scalar, labeled as an
+  approximation since the missing key itself has no position of its
+  own; Path-only, exact; and both together). Confirmed leak-free under
+  valgrind for both.
 * DONE Analyze how alibfyaml interacts with libfyaml's zero-copy string handling
   libfyaml avoids copying strings wherever the decoded value coincides
   with the source bytes:

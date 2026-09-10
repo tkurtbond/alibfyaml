@@ -391,6 +391,20 @@ package Libfyaml.Thin is
       Flags : C.unsigned) return Fy_Node
      with Import, Convention => C, External_Name => "fy_node_by_path";
 
+   function fy_node_get_path (Fyn : Fy_Node) return CS.chars_ptr
+     with Import, Convention => C, External_Name => "fy_node_get_path";
+   --  Dynamically allocated (caller must Thin.C_Free it -- same
+   --  convention as fy_emit_document_to_string, Libfyaml.Documents.
+   --  To_YAML's Ptr). Works on any node kind, mapping/sequence
+   --  included -- unlike fy_node_get_scalar_token, which is NULL for
+   --  a non-scalar node. The header claims "NULL if fyn is the root"
+   --  but that's not what happens: confirmed live (navigate.yaml, the
+   --  document root) that the root returns the real string "/", not
+   --  NULL -- Libfyaml.Nodes.Path still guards for NULL defensively
+   --  (returning "") since the header's claim might hold in some
+   --  other, unconfirmed case, but "/" is the actual root value seen
+   --  so far, not "".
+
    ------------
    --  Emit  --
    ------------
