@@ -219,6 +219,45 @@
   (a subprogram's own exception handler doesn't cover its own
   declarative part), confirmed live with valgrind and fixed before
   this item was considered done.
+* DONE Fix Is_Null_Value calling fy_node_is_null on unresolved alias nodes
+  Found via the sibling slibfyaml binding (Chicken Scheme,
+  ~/Repos/Scheme/Chicken/5/slibfyaml), not by anything in this
+  project's own test suite -- see PLAN.md's "Is_Null_Value on an
+  unresolved alias node" section for the full writeup.
+
+  Is_Null_Value (src/libfyaml-nodes.adb) calls Thin.fy_node_is_null
+  unconditionally, including on a node that Is_Alias would identify as
+  an unresolved alias (one drawn from Document_Stream/Open_String/
+  Open_File before Resolve/Resolve_Anchors => True has run).
+  slibfyaml's own Phase 7 work root-caused, with valgrind
+  --track-origins=yes, that calling fy_node_is_null on such a node
+  reads an uninitialized field entirely inside libfyaml itself
+  (fy_token_alloc_rl via the scan/fetch/parse call chain in
+  fy-parse.c), intermittently misreporting the node as null when it
+  isn't -- reproduced only via the streaming parser, not via
+  fy_document_build_from_string/_file's one-shot path.
+
+  Not yet confirmed live against alibfyaml itself -- no existing test
+  here calls Is_Null_Value on an unresolved alias node -- but the
+  exposure is structurally identical to slibfyaml's confirmed bug.
+
+  Fixed (ported directly from slibfyaml's own fix): Is_Null_Value
+  (src/libfyaml-nodes.adb) now short-circuits to False for any
+  Is_Alias (N) node, skipping fy_node_is_null (and the
+  null-text-spelling check) entirely, before ever touching
+  Scalar_Value. Doc comment on Is_Null_Value in src/libfyaml-nodes.ads
+  updated to state this explicitly.
+
+  Added a new check to test/test_anchors.adb, on the existing
+  unresolved alias node from the "Resolve_Anchors => False" block
+  (Same, before the explicit Resolve call): "unresolved parse:
+  Is_Null_Value is False on the alias node". Full suite re-run
+  afterward with no regressions; test_anchors confirmed clean under
+  valgrind except for the one already-documented libfyaml-internal
+  leak in the merge-key reference-loop's own diagnostic path (see
+  PLAN.md's "Anchors, aliases, merge keys, and explicit tags"
+  section) -- same stack trace as before, not a new issue from this
+  change.
 * CANCELLED Resolve YAML 1.1 language-independent types: timestamp, binary, merge, omap, pairs, set
   The typed-scalar accessors in Libfyaml.Nodes (Is_Integer/Is_Float/
   Is_Boolean/Integer_Value/etc.) only resolve the YAML 1.2 core schema

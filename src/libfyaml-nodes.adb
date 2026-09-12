@@ -231,8 +231,21 @@ package body Libfyaml.Nodes is
    end Location;
 
    function Is_Null_Value (N : Node) return Boolean is
-     (Boolean (Thin.fy_node_is_null (N.Handle))
-      or else (Is_Scalar (N) and then Is_Null_Text (Trimmed (Scalar_Value (N)))));
+     (if Is_Alias (N) then False
+      else Boolean (Thin.fy_node_is_null (N.Handle))
+        or else (Is_Scalar (N) and then Is_Null_Text (Trimmed (Scalar_Value (N)))));
+   --  Is_Alias is checked first and short-circuits to False, never
+   --  reaching fy_node_is_null, for an unresolved alias node -- found
+   --  necessary by the sibling slibfyaml binding (Chicken Scheme),
+   --  not by anything in this project's own test suite: calling
+   --  fy_node_is_null on such a node reads an uninitialized field
+   --  entirely inside libfyaml itself (confirmed there with valgrind
+   --  --track-origins=yes), intermittently misreporting the node as
+   --  null. Independently justified even without that libfyaml bug:
+   --  an unresolved alias's own scalar text is a reference name (the
+   --  anchor being pointed to), not real content, so neither check is
+   --  a meaningful question to ask of it pre-resolution. See PLAN.md's
+   --  "Is_Null_Value on an unresolved alias node" section.
 
    function Is_Integer (N : Node) return Boolean is
      (Is_Integer_Text (Trimmed (Scalar_Value (N))));

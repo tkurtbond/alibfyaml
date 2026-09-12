@@ -353,6 +353,53 @@ indication of it.
    The `False` default is a placeholder, not a settled decision — see
    open questions.
 
+## Is_Null_Value on an unresolved alias node (fixed)
+
+**[done]** Found via the sibling `slibfyaml` binding (Chicken Scheme,
+`~/Repos/Scheme/Chicken/5/slibfyaml`), not by anything in this
+project's own test suite.** `Is_Null_Value` (`src/libfyaml-nodes.adb`)
+calls `Thin.fy_node_is_null` unconditionally:
+
+```ada
+function Is_Null_Value (N : Node) return Boolean is
+  (Boolean (Thin.fy_node_is_null (N.Handle))
+   or else (Is_Scalar (N) and then Is_Null_Text (Trimmed (Scalar_Value (N)))));
+```
+
+`slibfyaml`'s Phase 7 work (its own `PLAN.md`) root-caused, with
+`valgrind --track-origins=yes` after a test intermittently misbehaved,
+that calling `fy_node_is_null` on an **unresolved alias node** (one
+drawn from the streaming parser, i.e. `Document_Stream`/`Open_String`/
+`Open_File`, before `Resolve`/`Resolve_Anchors => True` has run) reads
+an uninitialized field entirely inside libfyaml itself
+(`fy_token_alloc_rl` via the scan/fetch/parse call chain in
+`fy-parse.c`) — the node intermittently, non-deterministically reads
+back as null when it isn't. Confirmed by `slibfyaml` to be scoped to
+the streaming parser specifically: `fy_document_build_from_string`/
+`_file`'s one-shot path (what `Parse_String`/`Parse_File` use) does
+not allocate through the same code and never reproduces it; only
+`Document_Stream` (`fy_parse_load_document`) can trigger it.
+
+**Not confirmed to have actually misfired in this codebase** — no test
+here called `Is_Null_Value` on an unresolved alias node before this
+fix, so libfyaml's uninitialized-field read was never exercised here —
+but the exposure was structurally identical: `Is_Null_Value` had the
+same shape here as `node-null-value?` did in `slibfyaml` before its
+fix, and `Document_Stream` gives `alibfyaml` the same unresolved-alias
+starting state `slibfyaml`'s streaming parser does.
+
+**Fix applied, ported directly from `slibfyaml`'s own fix:**
+`Is_Null_Value` now short-circuits to `False` for any `Is_Alias (N)`
+node, skipping `fy_node_is_null` (and the null-text-spelling check)
+entirely — justified independently of the libfyaml-internal bug, too:
+an unresolved alias's own scalar text is a reference name (the anchor
+being pointed to), not real content, so neither check is a meaningful
+question to ask of it pre-resolution. Covered by a new check in
+`test/test_anchors.adb` on the existing unresolved alias node (`Same`,
+in the `Resolve_Anchors => False` block, before the explicit
+`Resolve`) — confirmed leak-free under valgrind, along with the full
+existing test suite re-run with no regressions.
+
 ## Multi-document YAML streams
 
 **[done]** Implemented as `Libfyaml.Documents.Streams.Document_Stream`
@@ -844,6 +891,29 @@ additions to the existing `test/config.yaml`) covering:
 
 ## Open questions
 
+- **`Fy_Parse_Cfg`/`Fy_Diag_Error` are hand-mirrored Ada records, an
+  ABI-drift risk `slibfyaml` deliberately avoided.** `Libfyaml.Thin`
+  (`src/libfyaml-thin.ads`) declares both as Ada records `with
+  Convention => C`, pinning this binding to those two C structs' exact
+  field order/padding as of the libfyaml version it was written
+  against — nothing checks that assumption against whatever
+  `libfyaml.h` is actually installed at build time. The sibling
+  `slibfyaml` binding (Chicken Scheme,
+  `~/Repos/Scheme/Chicken/5/slibfyaml`) hit the same C structs and
+  deliberately chose not to mirror them: it defines small
+  `foreign-lambda*` C-snippet accessors (e.g. `"C_return(cfg->flags);"`)
+  instead, letting the C compiler compute the real field offset at
+  build time against the actual installed header — a technique it
+  borrowed from the existing `yaml` Chicken egg's own `yaml_event_t`
+  handling. Ada's analogue would be small C shim functions (e.g.
+  `unsigned fy_parse_cfg_get_flags(struct fy_parse_cfg *cfg) { return
+  cfg->flags; }`, compiled and linked in, called via `pragma Import`)
+  instead of the mirrored records — real extra build-system surface
+  (a `.c` file to compile), not a drop-in change, so not applied here
+  without weighing that cost. No confirmed incident of actual
+  ABI drift against this project's own libfyaml build; flagged as a
+  standing risk this binding carries and `slibfyaml` doesn't, not
+  something broken today.
 - **YAML 1.1 boolean spellings** (`yes`/`no`/`on`/`off`): out of v1
   scope per the core-schema-only design goal above, but flag in case a
   consumer's data actually uses them — would need an opt-in "legacy

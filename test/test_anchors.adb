@@ -77,6 +77,9 @@ begin
              Same.Scalar_Value = "b");
       Check ("unresolved parse: merge key's pairs are not yet reachable",
              not D.Root.By_Path ("/derived/x").Is_Valid);
+      Check ("unresolved parse: Is_Null_Value is False on the alias node " &
+             "(never reads its text/queries libfyaml's own null check)",
+             not Same.Is_Null_Value);
 
       Doc.Resolve (D);
       Check ("after explicit Resolve: alias is no longer Is_Alias",

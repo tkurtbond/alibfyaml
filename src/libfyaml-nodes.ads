@@ -90,6 +90,15 @@ package Libfyaml.Nodes is
    --  null, and libfyaml's own empty-scalar check already handles the
    --  unquoted-omitted case correctly, so text equal to "" is
    --  deliberately not treated as a null spelling here).
+   --
+   --  Always False for an unresolved alias node (Is_Alias (N)):
+   --  its own scalar text is a reference name, not real content, so
+   --  neither the empty/omitted check nor the null-spelling check is
+   --  a meaningful question to ask of it pre-resolution -- and, found
+   --  via the sibling slibfyaml binding, calling libfyaml's own
+   --  fy_node_is_null on such a node can read an uninitialized field
+   --  inside libfyaml itself. See PLAN.md's "Is_Null_Value on an
+   --  unresolved alias node" section.
 
    --------------------------
    --  Scalar node access  --
