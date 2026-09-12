@@ -98,6 +98,50 @@ case and the "Anchors, aliases, merge keys, and explicit tags" section
 of PLAN.md. Every other test, and every other case in `test_anchors`,
 is confirmed leak-free.
 
+## Benchmarking
+
+`bench/` holds performance regression checks, kept and run separately
+from `test/` (its programs aren't `Check`/ok/FAIL tests, and its
+generated fixtures are large enough that they're gitignored, not
+checked in). Built at repo introduction time to measure the
+Node/Document liveness enforcement change's runtime cost -- see
+PLAN.md's "Node/Document liveness enforcement" section's own
+"Performance" subsection for the last recorded numbers -- and meant to
+be reused for any future change to `Node`/`Document`'s hot paths
+(anything touching `Wrap`, `Owner_Liveness`, or `Buffer_Ref`).
+
+```sh
+cd bench
+python3 gen_wide.py 200000 wide.yaml        # one large single Document
+python3 gen_manydocs.py 20000 manydocs.yaml # many small separate Documents
+gprbuild -P bench.gpr -p -largs $(pkg-config --libs libfyaml)
+./run_stats.sh ./bench_wide wide.yaml 10       # n/mean/min/max/stddev over 10 runs
+./run_stats.sh ./bench_streams manydocs.yaml 10
+```
+
+`bench_wide.adb` parses one large document (a top-level sequence of N
+small mappings) and navigates every entity in it -- stresses Node
+creation/navigation (`Value`/`Iterate`, each a `Wrap` call) within a
+single `Document`. `bench_streams.adb` streams many small separate
+documents from one file, doing a little work with each and letting it
+go out of scope immediately -- stresses `Document` creation/
+destruction instead. Both print a checksum alongside the timing, so a
+change that alters behavior (not just speed) is caught too, not just
+silently benchmarked.
+
+**To compare two commits** (the recipe used to measure the liveness-
+enforcement change): both `bench_*.adb` and `bench.gpr` use only this
+project's public API and a relative `with "../libfyaml_ada.gpr";`, so
+the *same* `bench/` directory's sources can be built against any
+commit's library without modification -- check out each commit into
+its own `git worktree` (so both library builds coexist on disk
+simultaneously), build `libfyaml_ada.gpr` in each, copy (or symlink)
+this `bench/` directory's sources plus a `bench.gpr` into each
+worktree, build `bench.gpr` there against that worktree's own
+`libfyaml_ada.gpr`, and run `run_stats.sh` against the same fixture
+files from both. Remove the worktrees (`git worktree remove`) once
+done -- they're scratch, not meant to persist.
+
 ## Layout
 
 - `src/libfyaml-thin.ads` -- low-level 1:1 `Interfaces.C` imports, no
@@ -115,6 +159,7 @@ is confirmed leak-free.
   streaming, a child package (see its own header comment for why it
   has to be a child rather than living in `Libfyaml.Documents`).
 - `test/` -- one standalone program per concern, see Test above.
+- `bench/` -- performance regression checks, see Benchmarking above.
 - `PLAN.md` -- design history, confirmed findings, and open questions,
   organized by feature section (append to the relevant section rather
   than starting a new doc). `[done]` marks a finished section; a

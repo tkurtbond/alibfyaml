@@ -1,0 +1,15 @@
+with "../libfyaml_ada.gpr";
+
+project Bench is
+
+   for Languages use ("Ada");
+   for Source_Dirs use (".");
+   for Object_Dir use "obj";
+   for Exec_Dir use ".";
+   for Main use ("bench_wide.adb", "bench_streams.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use ("-gnat2012", "-O2", "-g");
+   end Compiler;
+
+end Bench;

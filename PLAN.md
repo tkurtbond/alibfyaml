@@ -969,6 +969,32 @@ leak/error status to before it in every case, including
 (confirmed bit-for-bit identical against a stash of the pre-change
 tree, not just assumed unaffected).
 
+**Performance: measured, not assumed.** The refcounting cost this
+design accepts (see "Rejected alternatives" above) is real and
+non-trivial, not negligible next to the FFI call each accessor already
+makes -- confirmed by `bench/` (see AGENTS.md's Benchmarking section),
+comparing this commit against the immediately-preceding one (the
+`Is_Null_Value` fix, before any of this section's changes) via two
+isolated `git worktree` builds of the same benchmark source:
+
+| Benchmark | What it stresses | Old mean | New mean | Overhead |
+|---|---|---|---|---|
+| `bench_wide` (200,000-entity single `Document`, every entity navigated via `Value`) | `Node` creation/navigation -- one `Wrap` (hence one `Owner_Liveness` copy) per accessed field | 0.879 s | 1.007 s | **+14.5%** |
+| `bench_streams` (20,000 small separate `Document`s, one at a time) | `Document` creation/destruction -- one `New_Owner_Liveness` alloc + `Mark_Dead` per document | 0.056 s | 0.062 s | **+10.7%** |
+
+(10 runs each; both benchmarks print a checksum alongside the timing,
+confirmed bit-for-bit identical between old and new in every run --
+this is a pure speed cost, not a behavior change.) Both land in the
+same ~11-15% range, matching the design: every `Node`/`Document` copy
+now touches a heap-allocated refcounted cell (an `Adjust`/`Finalize`
+pair), on top of the FFI call itself. Not investigated further or
+optimized -- no concrete workload has flagged this as a problem, and
+correctness (closing a real, confirmed-elsewhere use-after-free class)
+was judged worth a double-digit-percent constant-factor cost on
+Node/Document-heavy workloads. Revisit with `bench/` if that judgment
+call needs to be reopened, e.g. against a workload that turns out to
+be far more Node/Document-churn-heavy than these synthetic fixtures.
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or
