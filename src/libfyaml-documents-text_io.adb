@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Ada.Text_IO.C_Streams;
 with Interfaces.C;
+with Libfyaml.Nodes;
 with Libfyaml.Thin;
 with System;
 
@@ -36,7 +37,8 @@ package body Libfyaml.Documents.Text_IO is
       --  Parse -- a FILE*-backed input is read into a buffer libfyaml
       --  allocates and owns itself, not a span into anything Ada-owned.
       return Document'(Ada.Finalization.Limited_Controlled with
-                          Handle => Handle, Owned_Buffer => <>);
+                          Handle => Handle, Owned_Buffer => <>,
+                          Owner => Nodes.New_Owner_Liveness);
    end Parse;
 
 end Libfyaml.Documents.Text_IO;

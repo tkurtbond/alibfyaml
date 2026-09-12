@@ -167,7 +167,8 @@ package body Libfyaml.Documents is
       --  (see Owned_Buffer in the spec) and it's freed in Finalize.
       return Result : Document :=
         (Ada.Finalization.Limited_Controlled with
-           Handle => Handle, Owned_Buffer => <>)
+           Handle => Handle, Owned_Buffer => <>,
+           Owner => Nodes.New_Owner_Liveness)
       do
          Result.Owned_Buffer := Make_Buffer_Ref (C_Text);
       end return;
@@ -194,7 +195,8 @@ package body Libfyaml.Documents is
       Handle := Parse_Common (Build'Access, Resolve_Flags (Resolve_Anchors));
       CS.Free (C_Path);
       return Document'(Ada.Finalization.Limited_Controlled with
-                          Handle => Handle, Owned_Buffer => <>);
+                          Handle => Handle, Owned_Buffer => <>,
+                          Owner => Nodes.New_Owner_Liveness);
    exception
       when others =>
          CS.Free (C_Path);
@@ -210,7 +212,7 @@ package body Libfyaml.Documents is
    end Resolve;
 
    function Root (Doc : Document) return Nodes.Node is
-     (Nodes.Wrap (Thin.fy_document_root (Doc.Handle)));
+     (Nodes.Wrap (Thin.fy_document_root (Doc.Handle), Doc.Owner));
 
    procedure Set_Root (Doc : in out Document; N : Nodes.Node) is
       Status : constant C.int := Thin.fy_document_set_root (Doc.Handle, Nodes.Raw (N));
@@ -251,14 +253,14 @@ package body Libfyaml.Documents is
         Thin.fy_node_create_scalar_copy (Doc.Handle, C_Value, C.size_t (Value'Length));
    begin
       CS.Free (C_Value);
-      return Nodes.Wrap (Result);
+      return Nodes.Wrap (Result, Doc.Owner);
    end Create_Scalar;
 
    function Create_Sequence (Doc : in out Document) return Nodes.Node is
-     (Nodes.Wrap (Thin.fy_node_create_sequence (Doc.Handle)));
+     (Nodes.Wrap (Thin.fy_node_create_sequence (Doc.Handle), Doc.Owner));
 
    function Create_Mapping (Doc : in out Document) return Nodes.Node is
-     (Nodes.Wrap (Thin.fy_node_create_mapping (Doc.Handle)));
+     (Nodes.Wrap (Thin.fy_node_create_mapping (Doc.Handle), Doc.Owner));
 
    function To_YAML (Doc : Document; Flags : Emit_Flags := Emit_Default) return String is
       Ptr : constant CS.chars_ptr := Thin.fy_emit_document_to_string (Doc.Handle, Flags);
@@ -288,13 +290,18 @@ package body Libfyaml.Documents is
 
    overriding procedure Finalize (Doc : in out Document) is
    begin
+      --  Mark_Dead first, before the handle is actually destroyed --
+      --  see this procedure's own doc comment in the spec. Idempotent
+      --  and safe on a never-live Owner (e.g. a default-constructed
+      --  Document), so no guard is needed here.
+      Nodes.Mark_Dead (Doc.Owner);
       if Doc.Handle /= Thin.Null_Fy_Document then
          Thin.fy_document_destroy (Doc.Handle);
          Doc.Handle := Thin.Null_Fy_Document;
       end if;
-      --  Doc.Owned_Buffer is a Buffer_Ref, a controlled component --
-      --  the language finalizes it automatically right after this
-      --  procedure body completes; see its own Finalize.
+      --  Doc.Owned_Buffer/Doc.Owner are controlled components -- the
+      --  language finalizes each automatically right after this
+      --  procedure body completes; see each type's own Finalize.
    end Finalize;
 
 end Libfyaml.Documents;

@@ -37,23 +37,36 @@
 --  from it, freed only once the last holder is gone -- see PLAN.md's
 --  "Document_Stream buffer lifetime" section for the full writeup.
 --
---  That lifetime rule is enforced by convention, not by the compiler
---  or at runtime: Is_Valid (used as the Pre on every accessor below)
---  only checks N against Null_Node -- it has no way to ask "is my
---  owning Document still alive?", so a Node used after its Document's
---  Finalize has run fails a null-handle check nowhere, and instead
---  either reads freed memory or (per the case above) a freed buffer,
---  same failure class as every confirmed lifetime bug this file's
---  history is made of. A sibling binding to the same C library for a
---  garbage-collected host (slibfyaml, targeting Chicken Scheme --
---  ~/Repos/Scheme/Chicken/5/slibfyaml) chose to track this at runtime
---  instead: give each node a reference to its owning document object,
---  and check that document's own liveness flag on every accessor
---  before touching the handle, turning this class of mistake into a
---  raised condition instead of a silent use-after-free. See this
---  project's own PLAN.md, "Open questions", for whether the same is
---  worth doing here -- not pursued in this binding yet.
+--  That lifetime rule IS enforced at runtime, not just by convention:
+--  Is_Valid (used as the Pre on every accessor below) checks both N
+--  against Null_Node AND whether N's owning Document has since been
+--  Finalized -- a Node used after its Document is gone now fails
+--  Is_Valid's own check (and hence, with -gnata enabled, every Pre =>
+--  Is_Valid (N) site raises a clean Ada.Assertions.Assertion_Error)
+--  instead of silently reading freed memory or a freed buffer, same
+--  failure class as every confirmed lifetime bug this file's history
+--  is made of. Ported from a sibling binding to the same C library for
+--  a garbage-collected host (slibfyaml, targeting Chicken Scheme --
+--  ~/Repos/Scheme/Chicken/5/slibfyaml), which tracks this the
+--  equivalent way for a host with no deterministic destructors: give
+--  each node a reference to a liveness flag shared with its owning
+--  document, checked on every accessor before touching the handle.
+--  Ada's own answer, without a garbage collector, is a small
+--  reference-counted flag (Owner_Liveness, in the private part below)
+--  shared between a Document and every Node drawn from it: Document's
+--  own Finalize flips it to dead (via Mark_Dead) before destroying the
+--  underlying libfyaml handle, and the flag cell itself survives for
+--  as long as anything -- the Document, or any Node copy -- still
+--  references it, even after the Document object's own storage is
+--  gone, so a Node can always safely read it. This is the same
+--  refcounting shape Libfyaml.Documents' own Buffer_Ref already uses
+--  for a shared buffer, applied here to a shared boolean instead --
+--  see PLAN.md's "Node/Document liveness enforcement" section for the
+--  full design writeup and why a deliberate small leak (never freeing
+--  the flag) or an unchecked pointer into the Document's own storage
+--  were both rejected in favor of refcounting.
 
+with Ada.Finalization;
 with Libfyaml.Thin;
 
 package Libfyaml.Nodes is
@@ -65,7 +78,13 @@ package Libfyaml.Nodes is
    --  Libfyaml.Documents.Root on a document with no root node yet.
 
    function Is_Valid (N : Node) return Boolean;
-   --  True unless N is Null_Node.
+   --  True unless N is Null_Node, OR N's owning Document has since
+   --  been Finalized (see the header comment above for how this is
+   --  tracked). Used as the Pre on every accessor below, so both
+   --  failure modes surface the same way: a clean, checked failure
+   --  (Ada.Assertions.Assertion_Error, with -gnata enabled) rather
+   --  than either reading freed memory (the second case) or an
+   --  unhelpful generic error (Constraint_Error or worse, the first).
 
    type Node_Kind is (Scalar_Node, Sequence_Node, Mapping_Node);
 
@@ -349,24 +368,93 @@ package Libfyaml.Nodes is
    --  N's raw explicit YAML tag text (e.g. "tag:yaml.org,2002:str", or
    --  a custom "!mytag"), or "" if N has no explicit tag.
 
-   ----------------------------------------------------------
-   --  Binding-internal: bridges to/from the Thin C handle. --
-   --  Used by Libfyaml.Documents; not needed by ordinary   --
-   --  callers of this package.                             --
-   ----------------------------------------------------------
+   ------------------------------------------------------------------
+   --  Binding-internal: bridges to/from the Thin C handle, and      --
+   --  owner-liveness tracking. Used by Libfyaml.Documents (and its  --
+   --  child packages); not needed by ordinary callers of this       --
+   --  package.                                                      --
+   ------------------------------------------------------------------
 
-   function Wrap (Handle : Thin.Fy_Node) return Node;
+   type Owner_Liveness is private;
+   --  A reference-counted flag shared between a Document and every
+   --  Node drawn from it -- see the header comment above for the
+   --  full design. Document creates a fresh one (New_Owner_Liveness)
+   --  each time it is constructed and flips it to dead (Mark_Dead) in
+   --  its own Finalize, before destroying the underlying libfyaml
+   --  handle.
+
+   function New_Owner_Liveness return Owner_Liveness;
+   --  A fresh, live flag, reference count one.
+
+   procedure Mark_Dead (Owner : in out Owner_Liveness);
+   --  Idempotent: safe to call more than once on the same Owner (or
+   --  on one that was never live -- e.g. Null_Node's, or a default-
+   --  constructed Document's -- which this leaves alone).
+
+   function Wrap (Handle : Thin.Fy_Node; Owner : Owner_Liveness) return Node;
    function Raw (N : Node) return Thin.Fy_Node;
 
 private
 
+   type Liveness_Cell is record
+      Count : Natural;
+      Alive : Boolean;
+   end record;
+   type Liveness_Cell_Access is access Liveness_Cell;
+
+   type Owner_Ref is new Ada.Finalization.Controlled with record
+      Cell : Liveness_Cell_Access := null;
+   end record;
+   --  The actual refcounting machinery, kept as an inner component of
+   --  Owner_Liveness below rather than Owner_Liveness itself deriving
+   --  from Controlled directly: Owner_Ref, deriving from Controlled,
+   --  is a tagged type, and Wrap below needs an Owner_Liveness
+   --  parameter alongside a Node (also tagged) result -- RM 3.9.3(10)
+   --  forbids one subprogram from being a dispatching primitive of two
+   --  different tagged types declared in the same immediate scope,
+   --  the exact restriction Libfyaml.Documents.Streams' own header
+   --  comment already describes hitting for Document/Document_Stream
+   --  (resolved there with a child package; not an option here, since
+   --  Node and Owner_Liveness both belong in this same package).
+   --  Wrapping the tagged Owner_Ref inside a plain (untagged)
+   --  Owner_Liveness record sidesteps it: Ada finalizes/adjusts a
+   --  controlled component automatically even when the enclosing type
+   --  is itself untagged and not controlled (RM 7.6), so refcounting
+   --  still works exactly the same way, just one level removed.
+
+   overriding procedure Adjust (Ref : in out Owner_Ref);
+   overriding procedure Finalize (Ref : in out Owner_Ref);
+
+   type Owner_Liveness is record
+      Ref : Owner_Ref;
+   end record;
+   --  Ref.Cell = null means "no owner to track" (Null_Node's Owner,
+   --  and a default-constructed Document's) -- treated as vacuously
+   --  alive by Is_Alive below, since Is_Valid's own Handle check
+   --  already excludes Null_Node before ever reaching it, and every
+   --  Owner_Liveness actually attached to a real Node (via Wrap,
+   --  always given a Document's own Owner) is never in this state.
+   --  Mirrors Libfyaml.Documents' own Buffer_Ref/Buffer_Cell shape
+   --  exactly (a small refcounted heap cell, freed only once the last
+   --  reference is gone) -- see that type's own comment for why a
+   --  plain non-refcounted access value (deliberately never freed)
+   --  was rejected: it would leak one cell per Document for the life
+   --  of the program, breaking this project's leak-free-under-
+   --  valgrind discipline for every single test that creates a
+   --  Document, not just the ones this feature is meant to cover.
+
+   function Is_Alive (Owner : Owner_Liveness) return Boolean is
+     (Owner.Ref.Cell = null or else Owner.Ref.Cell.Alive);
+
    type Node is tagged record
       Handle : Thin.Fy_Node := Thin.Null_Fy_Node;
+      Owner  : Owner_Liveness;
    end record;
 
-   Null_Node : constant Node := (Handle => Thin.Null_Fy_Node);
+   Null_Node : constant Node := (Handle => Thin.Null_Fy_Node, Owner => <>);
 
-   function Wrap (Handle : Thin.Fy_Node) return Node is (Node'(Handle => Handle));
+   function Wrap (Handle : Thin.Fy_Node; Owner : Owner_Liveness) return Node is
+     (Node'(Handle => Handle, Owner => Owner));
    function Raw (N : Node) return Thin.Fy_Node is (N.Handle);
 
 end Libfyaml.Nodes;

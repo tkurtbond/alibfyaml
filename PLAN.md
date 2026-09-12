@@ -863,6 +863,112 @@ against a clean checkout of the prior commit) and after the fix.
 Documented in `AGENTS.md`'s conventions section so it isn't
 rediscovered the same way by a future refactor.
 
+## Node/Document liveness enforcement
+
+**[done]** Closes the gap the "Open questions" entry above used to
+describe: `Node`'s lifetime contract ("valid as long as its owning
+`Document` hasn't been `Finalize`d") is now enforced at runtime, not
+just documented. Ported from the equivalent design in the sibling
+`slibfyaml` binding (Chicken Scheme,
+`~/Repos/Scheme/Chicken/5/slibfyaml`), adapted for a host with
+deterministic destruction but no garbage collector.
+
+**Design:** a small reference-counted flag, `Owner_Liveness`
+(`src/libfyaml-nodes.ads`, private part), shared between a `Document`
+and every `Node` drawn from it -- mirroring `Libfyaml.Documents`' own
+`Buffer_Ref`/`Buffer_Cell` shape exactly (a refcounted heap cell,
+freed only once the last reference is gone), applied here to a shared
+boolean instead of a shared buffer:
+
+- `Document` gains an `Owner : Nodes.Owner_Liveness` component, set to
+  a fresh `Nodes.New_Owner_Liveness` (a live flag, refcount one) by
+  every constructor: `Parse_String`, `Parse_File`,
+  `Document_Stream.Next`, `Text_IO.Parse`.
+- `Document.Finalize` calls `Nodes.Mark_Dead (Doc.Owner)` *before*
+  calling `Thin.fy_document_destroy` -- so any `Node` still holding a
+  copy of `Doc.Owner` observes "dead" rather than a still-live flag
+  alongside an about-to-be-freed handle, the same ordering discipline
+  `slibfyaml`'s own `document-destroy!` uses ("sets the box's slot to
+  `#f` before calling `fy_document_destroy`").
+- `Node.Wrap` now takes an `Owner : Owner_Liveness` parameter alongside
+  `Handle`, stored as a new `Owner` component on `Node`. Every call
+  site that builds a `Node` from a raw handle now threads the right
+  `Owner` through: `Libfyaml.Documents`' `Root`/`Create_Scalar`/
+  `Create_Sequence`/`Create_Mapping` pass `Doc.Owner`; `Libfyaml.Nodes`'
+  own internal navigation (`Item`, `Iterate` for both sequences and
+  mappings, `Value`, `By_Path`) propagates the *same* `N.Owner`/
+  `Map.Owner`/`Seq.Owner` the source `Node` already carries, since a
+  node reached by navigating from an existing one belongs to the same
+  `Document`.
+- `Is_Valid` is redefined as `N.Handle /= Thin.Null_Fy_Node and then
+  Is_Alive (N.Owner)` -- folded into the existing check rather than
+  added as a separate precondition, per this section's own "Open
+  questions" text weighing that option against a standalone helper.
+  This means **zero signature changes to any public accessor**: every
+  existing `Pre => Is_Valid (N)` site automatically gains the new
+  check for free, and a `Node` used after its `Document` is gone now
+  raises a clean `Ada.Assertions.Assertion_Error` (with `-gnata`
+  enabled, as both `.gpr` files already do) instead of reading freed
+  memory -- the same failure class as the `Insert_At`/`Parse_String`/
+  `Document_Stream` bugs elsewhere in this file, now caught instead of
+  hit.
+
+**A real structural constraint found while implementing this, not
+anticipated in the original open question:** `Owner_Liveness` cannot
+derive from `Ada.Finalization.Controlled` directly. Doing so makes it
+a tagged type, and `Wrap`'s profile (`Owner : Owner_Liveness` alongside
+a `Node` result, `Node` itself also tagged) then hits RM 3.9.3(10) --
+one subprogram cannot be a dispatching primitive of two different
+tagged types declared in the same immediate scope -- the exact
+restriction `Libfyaml.Documents.Streams`' own header comment already
+describes hitting for `Document`/`Document_Stream.Next` (resolved
+there with a child package). A child package was not an option here,
+since `Node` and `Owner_Liveness` both belong in `Libfyaml.Nodes`
+itself. Fixed by splitting the refcounting into an inner tagged type,
+`Owner_Ref` (the actual `Controlled` derivative), wrapped inside a
+plain untagged `Owner_Liveness` record (`type Owner_Liveness is record
+Ref : Owner_Ref; end record;`) -- Ada finalizes/adjusts a controlled
+component automatically even when the enclosing type is itself
+untagged and not controlled (RM 7.6), so refcounting still works
+exactly the same way, one level removed, with no tagged-type conflict.
+
+**Two rejected alternatives, considered and dropped before settling on
+refcounting, both because they'd break this project's leak-free-under-
+valgrind discipline or reintroduce the exact bug class being fixed:**
+
+1. **A deliberate small leak** -- heap-allocate the flag once per
+   `Document` and never free it (the cell must outlive `Document`'s own
+   storage, since a `Node` needs to read it after the `Document` object
+   itself is gone). Rejected: this would leak one cell for the life of
+   the program on *every* `Document` ever created, breaking "confirmed
+   leak-free under valgrind" for every single existing test, not just
+   the ones this feature is meant to cover.
+2. **An unchecked pointer directly into the `Document` object's own
+   storage** (e.g. `Doc.Live'Unchecked_Access`, a plain `Boolean`
+   component, no separate heap cell). Rejected: `Document`'s own
+   storage becomes invalid (stack reused, or freed if heap-allocated)
+   at the exact same moment its destruction makes the liveness check
+   necessary -- reading through such a pointer after that point is
+   itself a new use-after-free, the same failure class this feature
+   exists to close, just moved to a smaller piece of memory.
+
+**Confirmed leak-free under valgrind**, including the specific
+scenario this feature targets: a new `test/test_liveness.adb` (8
+checks) exercises a `Node` remaining valid while its `Document` is
+alive (both the root and one reached by `By_Path`), both becoming
+`Is_Valid => False` after the `Document` goes out of scope, an
+accessor call on such a `Node` raising `Ada.Assertions.Assertion_Error`
+rather than reading freed memory, `Null_Node` remaining an ordinary
+invalid node (not a special case of this feature), and two `Node`s
+drawn from the same `Document` becoming invalid *together* (confirming
+the flag is shared per-`Document`, not tracked per-`Node`). Also
+re-ran the full existing test suite (all `test_*.adb` and
+`example_*.adb`) under valgrind after this change: identical
+leak/error status to before it in every case, including
+`test_anchors`' one already-documented libfyaml-internal leak
+(confirmed bit-for-bit identical against a stash of the pre-change
+tree, not just assumed unaffected).
+
 ## Testing plan
 
 Extend `test/` with scalar-typed fixtures (either a new YAML file or
@@ -951,33 +1057,9 @@ additions to the existing `test/config.yaml`) covering:
   section above) — mirrors `fy_parse_load_document`'s own "call again,
   `NULL` means done" shape directly, and sidesteps needing new
   machinery for `Document`'s limited/controlled-ness.
-- **Node/Document liveness enforcement is documentation-only.** `Node`'s
-  lifetime contract ("valid as long as its owning `Document` hasn't
-  been `Finalize`d," see `Libfyaml.Nodes`' header comment) is checked
-  nowhere at runtime beyond `Is_Valid`'s null-handle test -- there is
-  no "is my owner still alive?" check, so a `Node` used after its
-  `Document` goes out of scope fails no precondition and instead reads
-  freed memory directly, the same failure shape as every lifetime bug
-  confirmed elsewhere in this file. No *confirmed* incident of this
-  specific case exists yet (unlike the three bugs above, all caught by
-  valgrind), but the gap is structural, not hypothetical. A sibling
-  binding to the same C library for a garbage-collected host
-  (`slibfyaml`, Chicken Scheme, `~/Repos/Scheme/Chicken/5/slibfyaml`)
-  decided to close the equivalent gap by giving every node handle a
-  reference to its owning document object and checking that document's
-  liveness flag on every accessor, turning the mistake into a raised
-  condition. Closing it here would need `Node` to carry a reference
-  back to its owning `Document` (it currently stores only the bare
-  `Thin.Fy_Node` handle -- see the `Node` private record in this
-  package) and a mutable liveness flag on `Document` checked by a
-  shared helper called from every `Pre => Is_Valid (N)` site, or
-  folded into `Is_Valid` itself. Deferred rather than decided: doing
-  this would change `Node` from a trivially-copyable bare-pointer
-  wrapper to one holding a reference to its `Document`, which needs
-  thinking through (aliasing/accessibility rules for that back-
-  reference, and whether it changes `Node`'s current pass-by-value
-  cost) before committing to it, and there is no confirmed real-world
-  incident yet forcing the question.
+- ~~**Node/Document liveness enforcement is documentation-only.**~~
+  Resolved: implemented. See the dedicated "Node/Document liveness
+  enforcement" section below for the design actually built.
 - **`Missing_Key`/`Data_Error` carry only a bare message, not
   `Path`/`Location`.** Confirmed by reading `libfyaml-nodes.adb`'s
   actual `raise` statements: `Required` raises `Missing_Key with

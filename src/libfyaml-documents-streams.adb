@@ -1,5 +1,6 @@
 with Interfaces.C;
 with Interfaces.C.Strings;
+with Libfyaml.Nodes;
 with System;
 
 package body Libfyaml.Documents.Streams is
@@ -192,10 +193,12 @@ package body Libfyaml.Documents.Streams is
       --  such hazard (confirmed live), so its Documents get none.
       if Stream.From_String then
          return Document'(Ada.Finalization.Limited_Controlled with
-                             Handle => Fyd, Owned_Buffer => Stream.Owned_Buffer);
+                             Handle => Fyd, Owned_Buffer => Stream.Owned_Buffer,
+                             Owner => Nodes.New_Owner_Liveness);
       else
          return Document'(Ada.Finalization.Limited_Controlled with
-                             Handle => Fyd, Owned_Buffer => <>);
+                             Handle => Fyd, Owned_Buffer => <>,
+                             Owner => Nodes.New_Owner_Liveness);
       end if;
    end Next;
 

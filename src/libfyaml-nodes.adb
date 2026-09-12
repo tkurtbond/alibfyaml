@@ -1,4 +1,5 @@
 with Ada.Strings.Fixed;
+with Ada.Unchecked_Deallocation;
 with Interfaces.C.Strings;
 with System;
 
@@ -6,6 +7,38 @@ package body Libfyaml.Nodes is
 
    package C renames Interfaces.C;
    package CS renames Interfaces.C.Strings;
+
+   procedure Free_Liveness_Cell is new Ada.Unchecked_Deallocation
+     (Liveness_Cell, Liveness_Cell_Access);
+
+   overriding procedure Adjust (Ref : in out Owner_Ref) is
+   begin
+      if Ref.Cell /= null then
+         Ref.Cell.Count := Ref.Cell.Count + 1;
+      end if;
+   end Adjust;
+
+   overriding procedure Finalize (Ref : in out Owner_Ref) is
+   begin
+      if Ref.Cell /= null then
+         Ref.Cell.Count := Ref.Cell.Count - 1;
+         if Ref.Cell.Count = 0 then
+            Free_Liveness_Cell (Ref.Cell);
+         end if;
+         Ref.Cell := null;
+      end if;
+   end Finalize;
+
+   function New_Owner_Liveness return Owner_Liveness is
+     (Ref => (Ada.Finalization.Controlled with
+                Cell => new Liveness_Cell'(Count => 1, Alive => True)));
+
+   procedure Mark_Dead (Owner : in out Owner_Liveness) is
+   begin
+      if Owner.Ref.Cell /= null then
+         Owner.Ref.Cell.Alive := False;
+      end if;
+   end Mark_Dead;
 
    use type C.int;
    use type CS.chars_ptr;
@@ -186,7 +219,7 @@ package body Libfyaml.Nodes is
    end Integer_Literal_Text;
 
    function Is_Valid (N : Node) return Boolean is
-     (N.Handle /= Thin.Null_Fy_Node);
+     (N.Handle /= Thin.Null_Fy_Node and then Is_Alive (N.Owner));
 
    function Kind (N : Node) return Node_Kind is
    begin
@@ -374,7 +407,7 @@ package body Libfyaml.Nodes is
       Result : constant Thin.Fy_Node :=
         Thin.fy_node_sequence_get_by_index (N.Handle, C.int (Index) - 1);
    begin
-      return Wrap (Result);
+      return Wrap (Result, N.Owner);
    end Item;
 
    procedure Append (Seq : Node; Item : Node) is
@@ -395,7 +428,7 @@ package body Libfyaml.Nodes is
       loop
          Cur := Thin.fy_node_sequence_iterate (Seq.Handle, Prev'Access);
          exit when Cur = Thin.Null_Fy_Node;
-         Visit (Wrap (Cur));
+         Visit (Wrap (Cur, Seq.Owner));
       end loop;
    end Iterate;
 
@@ -406,7 +439,7 @@ package body Libfyaml.Nodes is
       Result := Thin.fy_node_mapping_lookup_value_by_string
         (Map.Handle, C_Key, C.size_t (Key'Length));
       CS.Free (C_Key);
-      return Wrap (Result);
+      return Wrap (Result, Map.Owner);
    end Value;
 
    function Has_Key (Map : Node; Key : String) return Boolean is
@@ -431,8 +464,8 @@ package body Libfyaml.Nodes is
          Cur := Thin.fy_node_mapping_iterate (Map.Handle, Prev'Access);
          exit when Cur = Thin.Null_Fy_Node_Pair;
          Visit
-           (Wrap (Thin.fy_node_pair_key (Cur)),
-            Wrap (Thin.fy_node_pair_value (Cur)));
+           (Wrap (Thin.fy_node_pair_key (Cur), Map.Owner),
+            Wrap (Thin.fy_node_pair_value (Cur), Map.Owner));
       end loop;
    end Iterate;
 
@@ -594,7 +627,7 @@ package body Libfyaml.Nodes is
       Result := Thin.fy_node_by_path
         (N.Handle, C_Path, C.size_t (Path'Length), Thin.FYNWF_DONT_FOLLOW);
       CS.Free (C_Path);
-      return Wrap (Result);
+      return Wrap (Result, N.Owner);
    end By_Path;
 
    function Path (N : Node) return String is

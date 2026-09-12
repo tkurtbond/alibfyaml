@@ -191,14 +191,28 @@ private
       --  nothing to free) for Parse_File and for a Document drawn
       --  from an Open_File-based stream -- neither references any
       --  buffer this binding itself owns.
+      Owner        : Nodes.Owner_Liveness;
+      --  A fresh Nodes.New_Owner_Liveness, set by every constructor
+      --  (Parse_String, Parse_File, Document_Stream.Next, Text_IO.
+      --  Parse) -- passed to Nodes.Wrap by Root/Create_Scalar/
+      --  Create_Sequence/Create_Mapping below, so every Node drawn
+      --  from this Document shares it. See Libfyaml.Nodes' own header
+      --  comment and PLAN.md's "Node/Document liveness enforcement"
+      --  section for the full design.
    end record;
 
    overriding procedure Finalize (Doc : in out Document);
-   --  Owned_Buffer is NOT freed here directly: it is a controlled
-   --  component (Buffer_Ref), so the language finalizes it
-   --  automatically right after this procedure body completes,
-   --  decrementing its reference count and freeing the underlying
-   --  text only if that was the last reference.
+   --  Nodes.Mark_Dead (Doc.Owner) runs first, before the underlying
+   --  libfyaml handle is actually destroyed, so any Node still
+   --  holding a copy of Doc.Owner reads Is_Valid => False rather than
+   --  a still-live flag alongside an about-to-be-freed handle.
+   --
+   --  Owned_Buffer/Owner are NOT freed/released here directly: both
+   --  are controlled components (Buffer_Ref, Nodes.Owner_Liveness),
+   --  so the language finalizes each automatically right after this
+   --  procedure body completes, decrementing its reference count and
+   --  freeing the underlying text/flag cell only if that was the
+   --  last reference.
 
    function Collected_Errors
      (Diag : Thin.Fy_Diag; File_Override : String := "") return String;

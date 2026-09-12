@@ -12,6 +12,7 @@ test/test_parse_errors
 test/test_location
 test/test_path
 test/test_text_io
+test/test_liveness
 test/example_syntax_error
 test/example_value_error
 test/example_missing_field
