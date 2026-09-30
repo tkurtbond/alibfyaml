@@ -13,7 +13,7 @@ package body Libfyaml.Documents.Streams is
    use type Thin.Fy_Diag;
    use type Thin.Fy_Parser;
 
-   function Open_String (Text : String) return Document_Stream is
+   function Open_String (Text : String; Name : String := "") return Document_Stream is
       C_Text : CS.chars_ptr := CS.New_String (Text);
       Diag   : constant Thin.Fy_Diag := Thin.fy_diag_create (System.Null_Address);
       Cfg    : aliased Thin.Fy_Parse_Cfg;
@@ -46,16 +46,22 @@ package body Libfyaml.Documents.Streams is
            Handle => Fyp, Diag => Diag,
            Owned_Buffer => Libfyaml.Documents.Make_Buffer_Ref (C_Text),
            Pending => Thin.Null_Fy_Document, Peeked => False,
-           From_String => True);
+           From_String => True,
+           Name => Ada.Strings.Unbounded.To_Unbounded_String (Name));
    end Open_String;
 
    function Open_File (Path : String) return Document_Stream is
-      C_Path : CS.chars_ptr := CS.New_String (Path);
-      Diag   : constant Thin.Fy_Diag := Thin.fy_diag_create (System.Null_Address);
+      C_Path : CS.chars_ptr;
+      Diag   : Thin.Fy_Diag;
       Cfg    : aliased Thin.Fy_Parse_Cfg;
       Fyp    : Thin.Fy_Parser;
       Status : C.int;
    begin
+      --  Before anything is allocated, so that nothing leaks if it
+      --  raises.
+      Check_Readable (Path);
+      C_Path := CS.New_String (Path);
+      Diag := Thin.fy_diag_create (System.Null_Address);
       Thin.fy_diag_set_collect_errors (Diag, C.C_bool (True));
       Cfg.Diag := Diag;
       Fyp := Thin.fy_parser_create (Cfg'Access);
@@ -89,7 +95,8 @@ package body Libfyaml.Documents.Streams is
            Handle => Fyp, Diag => Diag,
            Owned_Buffer => Libfyaml.Documents.Make_Buffer_Ref (C_Path),
            Pending => Thin.Null_Fy_Document, Peeked => False,
-           From_String => False);
+           From_String => False,
+           Name => Ada.Strings.Unbounded.Null_Unbounded_String);
    end Open_File;
 
    --  Swap Stream's Diag for a brand new one. fy_diag_got_error is a
@@ -149,7 +156,9 @@ package body Libfyaml.Documents.Streams is
          declare
             Text : constant String := Libfyaml.Documents.Collected_Errors
               (Stream.Diag,
-               (if Stream.From_String then "(string-in-memory)" else ""));
+               (if Stream.From_String
+                then String_Name (Ada.Strings.Unbounded.To_String (Stream.Name))
+                else ""));
          begin
             Replace_Diag (Stream);
             if Text'Length > 0 then

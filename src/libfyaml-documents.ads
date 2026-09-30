@@ -21,9 +21,15 @@ package Libfyaml.Documents is
    -----------
 
    function Parse_String
-     (Text : String; Resolve_Anchors : Boolean := True) return Document;
+     (Text : String; Resolve_Anchors : Boolean := True; Name : String := "")
+      return Document;
    --  Parse Text as a standalone YAML/JSON document.
    --  Raises Libfyaml.Parse_Error on a syntax error.
+   --
+   --  Name is what error messages call the input, in place of the
+   --  file name they give for Parse_File: for example "<stdin>" for
+   --  text read from standard input. If it is empty they say
+   --  "(string-in-memory)".
    --
    --  Resolve_Anchors controls whether anchors (&foo), aliases (*foo),
    --  and merge keys (<<: *foo) are resolved as part of parsing (sets
@@ -41,8 +47,12 @@ package Libfyaml.Documents is
 
    function Parse_File
      (Path : String; Resolve_Anchors : Boolean := True) return Document;
-   --  As Parse_String, but reading from the file at Path. Raises
-   --  Libfyaml.Parse_Error if the file cannot be read or parsed.
+   --  As Parse_String, but reading from the file at Path. If the file
+   --  can't be opened, raises Ada.IO_Exceptions.Name_Error (it doesn't
+   --  exist) or Use_Error (anything else, such as no permission, or a
+   --  directory), as Ada.Text_IO.Open does, with the message
+   --  "PATH: REASON"; for example "x.yaml: No such file or directory".
+   --  Raises Libfyaml.Parse_Error if it can't be read or parsed.
 
    --  Note: Parse_String/Parse_File always mean "parse exactly one
    --  document" -- given input with more than one "---"-separated
@@ -225,12 +235,28 @@ private
    --  falls back to a synthetic "<memory-@ADDR-ADDR>" label
    --  (confirmed live) that is useless to a human or an editor
    --  jumping to it, and differs from run to run. Parse_String passes
-   --  "(string-in-memory)" here for exactly that reason; Parse_File
+   --  its Name, or "(string-in-memory)", here for exactly that
+   --  reason (String_Name below); Parse_File
    --  passes nothing, since Fy_Diag_Error.File already correctly
    --  echoes back the real path there.
    --  Declared here (not just in the body) so the child package
    --  Libfyaml.Documents.Streams can reuse it instead of duplicating
    --  the same formatting logic.
+
+   procedure Check_Readable (Path : String);
+   --  Raise Ada.IO_Exceptions.Name_Error or Use_Error, as documented
+   --  for Parse_File, if Path can't be opened for reading. libfyaml
+   --  opens a file only when it starts to parse it, and then reports
+   --  a failure to open it as a parse error with no reason (and
+   --  prints "[ERR]: failed to open PATH" on standard error itself),
+   --  so Parse_File and Document_Stream.Open_File check first.
+   --  Declared here for Libfyaml.Documents.Streams, as
+   --  Collected_Errors is.
+
+   function String_Name (Name : String) return String is
+     (if Name'Length > 0 then Name else "(string-in-memory)");
+   --  What error messages call string input named Name (see
+   --  Parse_String).
 
    function Parse_Common
      (Build : not null access function

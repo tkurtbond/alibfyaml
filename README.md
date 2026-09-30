@@ -133,6 +133,20 @@ too, quoting the first error's now-stale message — fixed), but it will
 not find any further documents even if the underlying input textually
 contains more.
 
+## Files that can't be opened, and naming string input
+
+`Parse_File` and `Open_File` raise `Ada.IO_Exceptions.Name_Error` for a
+file that doesn't exist, and `Use_Error` for one that can't be read
+(no permission, a directory), as `Ada.Text_IO.Open` does, with the
+message `PATH: REASON` (`x.yaml: No such file or directory`). A
+`Libfyaml.Parse_Error` always means the input was read but isn't valid
+YAML.
+
+Parse errors in string input name it `(string-in-memory)`. Give
+`Parse_String` or `Open_String` a `Name` to use instead: for example
+`Open_String (Text, Name => "<stdin>")` for text read from standard
+input gives `<stdin>:2:1: error: ...`.
+
 ## Building
 
 This is a pure Ada import layer — no C headers are compiled, so only the

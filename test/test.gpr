@@ -11,6 +11,7 @@ project Test is
       "test_navigate.adb", "test_streams.adb", "test_mutate.adb",
       "test_anchors.adb", "test_parse_errors.adb", "test_location.adb",
       "test_path.adb", "test_text_io.adb", "test_liveness.adb",
+      "test_open_errors.adb",
       "example_syntax_error.adb", "example_value_error.adb",
       "example_missing_field.adb");
 

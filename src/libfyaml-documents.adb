@@ -1,3 +1,6 @@
+with Ada.Directories;
+with Ada.IO_Exceptions;
+with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
@@ -136,8 +139,28 @@ package body Libfyaml.Documents is
    function Resolve_Flags (Resolve_Anchors : Boolean) return C.unsigned is
      (if Resolve_Anchors then Thin.FYPCF_RESOLVE_DOCUMENT else 0);
 
+   procedure Check_Readable (Path : String) is
+      use Ada.Directories;
+      F : Ada.Streams.Stream_IO.File_Type;
+   begin
+      if Path'Length = 0 then
+         raise Ada.IO_Exceptions.Name_Error with "no file name given";
+      end if;
+      --  Opening a directory for reading succeeds, and libfyaml then
+      --  finds no documents in it and reports no error (confirmed:
+      --  Open_File gave an empty stream).
+      if Exists (Path) and then Kind (Path) = Directory then
+         raise Ada.IO_Exceptions.Use_Error with Path & ": Is a directory";
+      end if;
+      --  GNAT raises Name_Error or Use_Error here, with the message
+      --  "PATH: REASON".
+      Ada.Streams.Stream_IO.Open (F, Ada.Streams.Stream_IO.In_File, Path);
+      Ada.Streams.Stream_IO.Close (F);
+   end Check_Readable;
+
    function Parse_String
-     (Text : String; Resolve_Anchors : Boolean := True) return Document
+     (Text : String; Resolve_Anchors : Boolean := True; Name : String := "")
+      return Document
    is
       C_Text : CS.chars_ptr := CS.New_String (Text);
 
@@ -160,7 +183,7 @@ package body Libfyaml.Documents is
       --  the other way leaked C_Text on every failed Parse_String call
       --  (confirmed live with valgrind) until this fix.
       Handle := Parse_Common
-        (Build'Access, Resolve_Flags (Resolve_Anchors), "(string-in-memory)");
+        (Build'Access, Resolve_Flags (Resolve_Anchors), String_Name (Name));
       --  C_Text is NOT freed here: fy_document_build_from_string doesn't
       --  copy the input, so the resulting document's scalars can point
       --  directly into this buffer. Ownership transfers to the Document
@@ -189,6 +212,7 @@ package body Libfyaml.Documents is
 
       Handle : Thin.Fy_Document;
    begin
+      Check_Readable (Path);
       --  See Parse_String's own comment on why Handle is assigned here,
       --  as a statement, rather than initialized in the declarative
       --  part above.

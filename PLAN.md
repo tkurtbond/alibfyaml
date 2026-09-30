@@ -704,6 +704,39 @@ different question -- an *opt-in* zero-copy construction API, where
 the caller (not this binding) would own the lifetime obligation --
 not something this fix resolves or is blocked on.
 
+## A file that can't be opened was reported as a parse error (fixed)
+
+**[done]** Found through besm2_fmt, which reported a missing file as
+libfyaml's own `[ERR]: failed to open nosuch.yaml` on standard error,
+then `Parse_Error` with the message `document failed to parse`, and
+no reason. libfyaml opens a file only when it starts parsing it
+(`fy_parser_set_input_file` just records the name; see
+`Document_Stream`'s buffer lifetime above), so the failure surfaced
+from `Has_Next`/`Next` as a failed parse, with nothing collected in
+the `Diag`. A directory was worse: it opens for reading, and libfyaml
+then found no documents in it and reported no error at all (confirmed:
+`Open_File` on a directory gave an empty stream).
+
+Fixed by `Check_Readable`, called first by `Parse_File` and
+`Open_File` (before `Open_File` allocates anything, so nothing leaks
+when it raises): it opens the file with `Ada.Streams.Stream_IO` and
+closes it again, so GNAT raises `Ada.IO_Exceptions.Name_Error` (no such
+file) or `Use_Error` (no permission) with the message `PATH: REASON`,
+as `Ada.Text_IO.Open` does -- confirmed with a scratch program for a
+missing file, a missing directory in the path, and a mode-000 file. A
+directory and an empty name, which GNAT opens or reports confusingly,
+are checked first. `Parse_Error` now always means the input was read
+and isn't valid YAML. Breaking for a caller that caught `Parse_Error`
+to handle a missing file; the only known caller is besm2_fmt, changed
+at the same time.
+
+Also: `Parse_String` and `Open_String` take an optional `Name`, used in
+their error messages in place of `(string-in-memory)`, so a program
+that reads standard input into a string can report `<stdin>:2:1:
+error: ...`.
+
+Covered by `test/test_open_errors.adb`, valgrind-clean.
+
 ## Zero-copy Create_Scalar -- decided not to pursue
 
 **[decided]** Analyzed as the follow-up to the buffer-lifetime fix

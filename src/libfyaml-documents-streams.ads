@@ -19,23 +19,27 @@
 --  Parse_File do.
 
 with Ada.Finalization;
+with Ada.Strings.Unbounded;
 with Libfyaml.Thin;
 
 package Libfyaml.Documents.Streams is
 
    type Document_Stream is tagged limited private;
 
-   function Open_String (Text : String) return Document_Stream;
+   function Open_String (Text : String; Name : String := "") return Document_Stream;
    --  Open Text for streaming; use Has_Next/Next to read documents
    --  from it. Raises Libfyaml.Parse_Error if the parser itself can't
    --  be set up (this is about the *parser*, not any one document --
    --  a syntax error in the first document surfaces from Next/Has_Next,
-   --  not here).
+   --  not here). Name is what error messages call the input, as for
+   --  Libfyaml.Documents.Parse_String: "(string-in-memory)" if empty.
 
    function Open_File (Path : String) return Document_Stream;
    --  Open the file at Path for streaming; use Has_Next/Next to read
-   --  documents from it. Raises Libfyaml.Parse_Error if the file can't
-   --  be opened.
+   --  documents from it. If the file can't be opened, raises
+   --  Ada.IO_Exceptions.Name_Error or Use_Error, as documented for
+   --  Libfyaml.Documents.Parse_File. Raises Libfyaml.Parse_Error if
+   --  the parser itself can't be set up.
 
    function Has_Next (Stream : in out Document_Stream) return Boolean;
    --  True if there is at least one more document to read. "in out"
@@ -94,15 +98,18 @@ private
       Peeked       : Boolean := False;
       --  Has_Next's one-ahead read-ahead cache, consumed by Next.
       From_String  : Boolean := False;
-      --  Set by Open_String, left False by Open_File: Fetch passes
-      --  this to Collected_Errors' File_Override so a Parse_Error
-      --  from a string-origin stream reports "(string-in-memory)"
-      --  instead of libfyaml's own synthetic, useless
+      --  Set by Open_String, left False by Open_File: Fetch then
+      --  passes Name (or "(string-in-memory)" if it's empty) to
+      --  Collected_Errors' File_Override so a Parse_Error from a
+      --  string-origin stream reports that instead of libfyaml's own
+      --  synthetic, useless
       --  "<memory-@ADDR-ADDR>" filename -- see Libfyaml.Documents.
       --  Parse_String, which has the identical issue for the same
       --  reason (fy_parser_set_string, like
       --  fy_document_build_from_string, has no real filename to
       --  report).
+      Name         : Ada.Strings.Unbounded.Unbounded_String;
+      --  Open_String's Name.
    end record;
 
    overriding procedure Finalize (Stream : in out Document_Stream);
