@@ -176,6 +176,15 @@ gprbuild -P test.gpr -p -largs -L/tmp/fyaml-prefix/lib64
 LD_LIBRARY_PATH=/tmp/fyaml-prefix/lib64 ./test_quickstart config.yaml
 ```
 
+To install it, use `make install`, which builds first: `gprinstall`
+alone copies `lib/` as it is, so after a pull it would install the new
+sources beside `.ali` files from the old ones, and programs using them
+can fail to bind. `GPRINSTALL` gives the installer and its options:
+
+```sh
+make install GPRINSTALL="gprinstall --prefix=$HOME/local"
+```
+
 **Note:** a `pkg-config --modversion libfyaml` on a system with an older
 packaged libfyaml (e.g. 0.8) will not have the 1.0-beta1 API this binding
 targets. Build libfyaml from source as above, or make sure
