@@ -54,6 +54,7 @@ cd test
 ./test_text_io
 ./test_liveness
 ./test_open_errors
+./test_emit
 ```
 
 `example_*.adb` in the same directory (also `Main`s in `test.gpr`,

@@ -14,6 +14,7 @@ test/test_path
 test/test_text_io
 test/test_liveness
 test/test_open_errors
+test/test_emit
 test/example_syntax_error
 test/example_value_error
 test/example_missing_field

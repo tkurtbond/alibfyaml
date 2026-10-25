@@ -737,6 +737,27 @@ error: ...`.
 
 Covered by `test/test_open_errors.adb`, valgrind-clean.
 
+## Emitter flags in the wrong fields (fixed)
+
+`Libfyaml.Thin` put the emitter's mode at bit 8 and its width at bit
+16, but libfyaml.h packs the indent at bit 8 (4 bits), the width at
+bit 12 (8 bits) and the mode at bit 20 (4 bits). So every
+`Emit_Mode_*` asked for an indent instead (`Emit_Mode_Block`, 1 at bit
+8, was an indent of 1 in the original mode), and the document came out
+in its own style: a flow mapping emitted with `Emit_Mode_Block` stayed
+flow, indented by one. `Emit_Default`, 255 at bit 16, was a width of
+240 and a mode of 15, which libfyaml emitted as the original style
+(the two `Emit_Default` checks of `test_emit` passed before the fix).
+Found by ova_cg_ada, which passed libfyaml's `FYECF_MODE_BLOCK`
+(`16#10_0000#`) itself until this was fixed.
+
+The constants are now libfyaml's: `FYECF_INDENT_SHIFT` 8,
+`FYECF_WIDTH_SHIFT` 12, `FYECF_MODE_SHIFT` 20, and `FYECF_DEFAULT` is
+`FYECF_WIDTH_INF or FYECF_MODE_ORIGINAL or FYECF_INDENT_DEFAULT`
+(`16#FF000#`). `test/test_emit.adb` checks each constant against
+libfyaml's value and each mode against what libfyaml then emits; ten
+of its twelve checks failed before the fix. Valgrind-clean.
+
 ## Zero-copy Create_Scalar -- decided not to pursue
 
 **[decided]** Analyzed as the follow-up to the buffer-lifetime fix

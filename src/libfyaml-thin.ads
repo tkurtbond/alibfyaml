@@ -95,10 +95,18 @@ package Libfyaml.Thin is
    FYECF_STRIP_DOC         : constant C.unsigned := 2#0001_0000#;
    FYECF_NO_ENDING_NEWLINE : constant C.unsigned := 2#0010_0000#;
 
-   --  Mode is a 4-bit field starting at bit 8 (see FYECF_MODE_SHIFT in the
-   --  C header); width is a further field. We only expose the named modes
-   --  actually used by the thick binding.
-   FYECF_MODE_SHIFT : constant := 8;
+   --  The indent, the width and the mode are fields of the same word,
+   --  as libfyaml.h's FYECF_INDENT, FYECF_WIDTH and FYECF_MODE macros
+   --  pack them: the indent 4 bits from bit 8, the width 8 bits from bit
+   --  12, the mode 4 bits from bit 20.  A field left 0 is its default (an
+   --  indent of 0 is libfyaml's default indent).  We only expose the
+   --  named modes actually used by the thick binding.  test_emit checks
+   --  these against libfyaml's values and its output.
+   FYECF_INDENT_SHIFT : constant := 8;
+   FYECF_WIDTH_SHIFT  : constant := 12;
+   FYECF_MODE_SHIFT   : constant := 20;
+
+   FYECF_INDENT_DEFAULT : constant C.unsigned := 0 * 2 ** FYECF_INDENT_SHIFT;
 
    FYECF_MODE_ORIGINAL     : constant C.unsigned := 0 * 2 ** FYECF_MODE_SHIFT;
    FYECF_MODE_BLOCK        : constant C.unsigned := 1 * 2 ** FYECF_MODE_SHIFT;
@@ -106,12 +114,11 @@ package Libfyaml.Thin is
    FYECF_MODE_FLOW_ONELINE : constant C.unsigned := 3 * 2 ** FYECF_MODE_SHIFT;
    FYECF_MODE_JSON         : constant C.unsigned := 4 * 2 ** FYECF_MODE_SHIFT;
 
-   --  Width field: bits 16..23, value 255 means "infinite" (see header).
-   FYECF_WIDTH_SHIFT : constant := 16;
-   FYECF_WIDTH_INF   : constant C.unsigned := 255 * 2 ** FYECF_WIDTH_SHIFT;
+   --  A width of 255 means "infinite" (see header).
+   FYECF_WIDTH_INF : constant C.unsigned := 255 * 2 ** FYECF_WIDTH_SHIFT;
 
    FYECF_DEFAULT : constant C.unsigned :=
-     FYECF_WIDTH_INF or FYECF_MODE_ORIGINAL;
+     FYECF_WIDTH_INF or FYECF_MODE_ORIGINAL or FYECF_INDENT_DEFAULT;
 
    ------------------------
    --  struct fy_parse_cfg --
