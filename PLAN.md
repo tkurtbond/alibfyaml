@@ -758,6 +758,32 @@ The constants are now libfyaml's: `FYECF_INDENT_SHIFT` 8,
 libfyaml's value and each mode against what libfyaml then emits; ten
 of its twelve checks failed before the fix. Valgrind-clean.
 
+## Styled scalars -- Libfyaml.Documents.Styled
+
+**[done]** `Create_Scalar` leaves a scalar's style to the emitter, which
+writes it plain even where plain YAML doesn't hold the text: `#1 fan`
+reads back as a comment, ` x` as `x`, and `'x` or `- x` doesn't parse.
+`Libfyaml.Documents.Styled.Create_Styled_Scalar` takes a style: plain
+where plain surely reads back the same (a deliberately narrow test),
+a literal block (`|`) for text one can hold, keeping its line breaks
+exactly with the chomping indicator, and double-quoted otherwise.
+Text that isn't well-formed UTF-8, which libfyaml refuses in any
+style, goes to `Create_Scalar`.
+
+The node is parsed from YAML source written in that style, since the
+emitter keeps a parsed scalar's style, with
+`fy_node_build_from_malloc_string`: libfyaml keeps pointing into the
+source, so it is copied into a `malloc`'d buffer that libfyaml then
+owns and frees with the document (or with its parser, if the source
+doesn't parse). It is a child of `Libfyaml.Documents` because it needs
+the document's handle.
+
+Moved here from ova_cg_ada, which wrote it as a child package of its
+own (a port of polibfyaml's `CreateStyledScalar`) so as not to change
+this library. `test/test_styled.adb` checks what each style writes for
+the texts plain can't hold and that each reads back as itself;
+valgrind-clean.
+
 ## Zero-copy Create_Scalar -- decided not to pursue
 
 **[decided]** Analyzed as the follow-up to the buffer-lifetime fix

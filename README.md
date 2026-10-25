@@ -45,6 +45,11 @@ It intentionally does **not** cover:
 * `src/libfyaml-documents-streams.ads/.adb` — `Document_Stream`: reads
   multiple `---`-separated documents from one input in sequence (see
   below); a child package of `Libfyaml.Documents`.
+* `src/libfyaml-documents-styled.ads/.adb` — `Create_Styled_Scalar`:
+  a scalar written plain, double-quoted or as a literal block, falling
+  back to double-quoted where the style asked for wouldn't read back as
+  the same text (`#1 fan` plain is a comment). `Create_Scalar` leaves
+  the style to the emitter, which writes it plain.
 * `test/` — built and run against a local libfyaml build as part of
   developing this binding: `test_quickstart.adb` (an Ada port of
   `examples/quick-start.c`), `test_sequence.adb`, `test_scalars.adb`
@@ -53,7 +58,9 @@ It intentionally does **not** cover:
   with a small regression-check section at the end), `test_streams.adb`
   (multi-document streaming,
   including a mid-stream parse error), and `test_mutate.adb`
-  (`Insert_At`'s success and failure outcomes for the node passed in).
+  (`Insert_At`'s success and failure outcomes for the node passed in),
+  and `test_styled.adb` (what each style of `Create_Styled_Scalar`
+  writes, and that it reads back).
 
 ## Typed scalar accessors
 
