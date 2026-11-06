@@ -373,6 +373,10 @@ package Libfyaml.Thin is
      (Fyn : Fy_Node; Key : CS.chars_ptr; Len : C.size_t) return Fy_Node
      with Import, Convention => C, External_Name => "fy_node_mapping_lookup_value_by_string";
 
+   function fy_node_mapping_lookup_key_by_string
+     (Fyn : Fy_Node; Key : CS.chars_ptr; Len : C.size_t) return Fy_Node
+     with Import, Convention => C, External_Name => "fy_node_mapping_lookup_key_by_string";
+
    function fy_node_mapping_append
      (Fyn_Map : Fy_Node; Fyn_Key : Fy_Node; Fyn_Value : Fy_Node) return C.int
      with Import, Convention => C, External_Name => "fy_node_mapping_append";

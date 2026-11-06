@@ -263,6 +263,48 @@ package body Libfyaml.Nodes is
       return (Line => Positive (Mk.Line + 1), Column => Positive (Mk.Column + 1));
    end Location;
 
+   --  Where a Missing_Key or Data_Error message says the fault is:
+   --  "LINE:COLUMN: PATH" when At_Node is a scalar with a location,
+   --  else "PATH".  A mark of line 1, column 1 counts as no location,
+   --  since a node built in memory carries exactly that (see
+   --  Has_Location in the spec); a real fault at the very start of
+   --  the input -- possible only for a key or a document that is a
+   --  single scalar -- loses its location, never gets a false one.
+   function Where (At_Node : Node; Path_Node : Node) return String is
+      function Image (N : Positive) return String is
+         S : constant String := Positive'Image (N);
+      begin
+         return S (S'First + 1 .. S'Last);
+      end Image;
+   begin
+      if Is_Valid (At_Node) and then Is_Scalar (At_Node)
+        and then Has_Location (At_Node)
+      then
+         declare
+            L : constant Node_Location := Location (At_Node);
+         begin
+            if L.Line > 1 or else L.Column > 1 then
+               return Image (L.Line) & ":" & Image (L.Column) & ": " & Path (Path_Node);
+            end if;
+         end;
+      end if;
+      return Path (Path_Node);
+   end Where;
+
+   function Where (N : Node) return String is (Where (N, N));
+
+   --  The key node for Key in Map: where a non-scalar value is
+   --  reported, since only a scalar has a location.
+   function Key_Node (Map : Node; Key : String) return Node is
+      C_Key  : CS.chars_ptr := CS.New_String (Key);
+      Result : Thin.Fy_Node;
+   begin
+      Result := Thin.fy_node_mapping_lookup_key_by_string
+        (Map.Handle, C_Key, C.size_t (Key'Length));
+      CS.Free (C_Key);
+      return Wrap (Result, Map.Owner);
+   end Key_Node;
+
    function Is_Null_Value (N : Node) return Boolean is
      (if Is_Alias (N) then False
       else Boolean (Thin.fy_node_is_null (N.Handle))
@@ -293,13 +335,13 @@ package body Libfyaml.Nodes is
       Text : constant String := Trimmed (Scalar_Value (N));
    begin
       if not Is_Integer_Text (Text) then
-         raise Libfyaml.Data_Error with "not a valid integer: """ & Text & '"';
+         raise Libfyaml.Data_Error with Where (N) & ": not a valid integer: """ & Text & '"';
       end if;
       begin
          return Integer'Value (Integer_Literal_Text (Text));
       exception
          when Constraint_Error =>
-            raise Libfyaml.Data_Error with "integer out of range: """ & Text & '"';
+            raise Libfyaml.Data_Error with Where (N) & ": integer out of range: """ & Text & '"';
       end;
    end Integer_Value;
 
@@ -307,13 +349,13 @@ package body Libfyaml.Nodes is
       Text : constant String := Trimmed (Scalar_Value (N));
    begin
       if not Is_Integer_Text (Text) then
-         raise Libfyaml.Data_Error with "not a valid integer: """ & Text & '"';
+         raise Libfyaml.Data_Error with Where (N) & ": not a valid integer: """ & Text & '"';
       end if;
       begin
          return Long_Integer'Value (Integer_Literal_Text (Text));
       exception
          when Constraint_Error =>
-            raise Libfyaml.Data_Error with "integer out of range: """ & Text & '"';
+            raise Libfyaml.Data_Error with Where (N) & ": integer out of range: """ & Text & '"';
       end;
    end Long_Integer_Value;
 
@@ -321,13 +363,13 @@ package body Libfyaml.Nodes is
       Text : constant String := Trimmed (Scalar_Value (N));
    begin
       if not Is_Integer_Text (Text) then
-         raise Libfyaml.Data_Error with "not a valid integer: """ & Text & '"';
+         raise Libfyaml.Data_Error with Where (N) & ": not a valid integer: """ & Text & '"';
       end if;
       begin
          return Long_Long_Integer'Value (Integer_Literal_Text (Text));
       exception
          when Constraint_Error =>
-            raise Libfyaml.Data_Error with "integer out of range: """ & Text & '"';
+            raise Libfyaml.Data_Error with Where (N) & ": integer out of range: """ & Text & '"';
       end;
    end Long_Long_Integer_Value;
 
@@ -335,7 +377,7 @@ package body Libfyaml.Nodes is
       Text : constant String := Trimmed (Scalar_Value (N));
    begin
       if not Is_Float_Text (Text) then
-         raise Libfyaml.Data_Error with "not a valid float: """ & Text & '"';
+         raise Libfyaml.Data_Error with Where (N) & ": not a valid float: """ & Text & '"';
       end if;
       begin
          declare
@@ -350,13 +392,13 @@ package body Libfyaml.Nodes is
             --  compiler/switch-dependent point.
             if not Result'Valid then
                raise Libfyaml.Data_Error with
-                 "float out of range: """ & Text & '"';
+                 Path (N) & ": float out of range: """ & Text & '"';
             end if;
             return Result;
          end;
       exception
          when Constraint_Error =>
-            raise Libfyaml.Data_Error with "float out of range: """ & Text & '"';
+            raise Libfyaml.Data_Error with Where (N) & ": float out of range: """ & Text & '"';
       end;
    end Float_Value;
 
@@ -364,7 +406,7 @@ package body Libfyaml.Nodes is
       Text : constant String := Trimmed (Scalar_Value (N));
    begin
       if not Is_Float_Text (Text) then
-         raise Libfyaml.Data_Error with "not a valid float: """ & Text & '"';
+         raise Libfyaml.Data_Error with Where (N) & ": not a valid float: """ & Text & '"';
       end if;
       begin
          declare
@@ -372,13 +414,13 @@ package body Libfyaml.Nodes is
          begin
             if not Result'Valid then
                raise Libfyaml.Data_Error with
-                 "float out of range: """ & Text & '"';
+                 Path (N) & ": float out of range: """ & Text & '"';
             end if;
             return Result;
          end;
       exception
          when Constraint_Error =>
-            raise Libfyaml.Data_Error with "float out of range: """ & Text & '"';
+            raise Libfyaml.Data_Error with Where (N) & ": float out of range: """ & Text & '"';
       end;
    end Long_Float_Value;
 
@@ -390,7 +432,7 @@ package body Libfyaml.Nodes is
       elsif Text = "false" or else Text = "False" or else Text = "FALSE" then
          return False;
       else
-         raise Libfyaml.Data_Error with "not a valid boolean: """ & Text & '"';
+         raise Libfyaml.Data_Error with Where (N) & ": not a valid boolean: """ & Text & '"';
       end if;
    end Boolean_Value;
 
@@ -473,7 +515,7 @@ package body Libfyaml.Nodes is
       Result : constant Node := Value (Map, Key);
    begin
       if not Is_Valid (Result) then
-         raise Libfyaml.Missing_Key with "missing required key """ & Key & '"';
+         raise Libfyaml.Missing_Key with Path (Map) & ": missing required key """ & Key & '"';
       end if;
       return Result;
    end Required;
@@ -487,7 +529,7 @@ package body Libfyaml.Nodes is
    begin
       if not Is_Scalar (Result) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), Result) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Result;
    end Required_Scalar;
@@ -524,7 +566,7 @@ package body Libfyaml.Nodes is
       end if;
       if not Is_Scalar (V) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), V) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Integer_Value (V);
    end Integer_Value;
@@ -539,7 +581,7 @@ package body Libfyaml.Nodes is
       end if;
       if not Is_Scalar (V) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), V) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Long_Integer_Value (V);
    end Long_Integer_Value;
@@ -555,7 +597,7 @@ package body Libfyaml.Nodes is
       end if;
       if not Is_Scalar (V) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), V) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Long_Long_Integer_Value (V);
    end Long_Long_Integer_Value;
@@ -570,7 +612,7 @@ package body Libfyaml.Nodes is
       end if;
       if not Is_Scalar (V) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), V) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Float_Value (V);
    end Float_Value;
@@ -585,7 +627,7 @@ package body Libfyaml.Nodes is
       end if;
       if not Is_Scalar (V) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), V) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Long_Float_Value (V);
    end Long_Float_Value;
@@ -600,7 +642,7 @@ package body Libfyaml.Nodes is
       end if;
       if not Is_Scalar (V) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), V) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Boolean_Value (V);
    end Boolean_Value;
@@ -615,7 +657,7 @@ package body Libfyaml.Nodes is
       end if;
       if not Is_Scalar (V) then
          raise Libfyaml.Data_Error with
-           "key """ & Key & """ is not a scalar value";
+           Where (Key_Node (Map, Key), V) & ": key """ & Key & """ is not a scalar value";
       end if;
       return Scalar_Value (V);
    end String_Value;

@@ -64,6 +64,21 @@ procedure Test_Scalars is
          Failures := Failures + 1;
    end Expect_Data_Error;
 
+   procedure Expect_Message
+     (Label    : String;
+      Expected : String;
+      Try      : not null access procedure)
+   is
+   begin
+      Try.all;
+      Ada.Text_IO.Put_Line ("FAIL - " & Label & " (no exception raised)");
+      Failures := Failures + 1;
+   exception
+      when E : Libfyaml.Missing_Key | Libfyaml.Data_Error =>
+         Check (Label & " = """ & Ada.Exceptions.Exception_Message (E) & '"',
+                Ada.Exceptions.Exception_Message (E) = Expected);
+   end Expect_Message;
+
 begin
    declare
       D   : constant Doc.Document := Doc.Parse_File ("scalars.yaml");
@@ -439,7 +454,100 @@ begin
              Map.Boolean_Value ("bool_true", False) = True);
       Check ("String_Value (name, ""x"") = ""widget""",
              Map.String_Value ("name", "x") = "widget");
+
+      -----------------------------------------------------------------
+      --  Messages start with the path of the node at fault: the
+      --  mapping for Missing_Key, the value for Data_Error.
+      -----------------------------------------------------------------
+      declare
+         procedure Try is
+            Unused : constant Integer :=
+              Map.Required ("not_scalar").Integer_Value ("b");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Message ("Missing_Key message has the mapping's path",
+                         "/not_scalar: missing required key ""b""",
+                         Try'Access);
+      end;
+
+      declare
+         procedure Try is
+            Unused : constant Integer := Map.Integer_Value ("malformed");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Message ("Data_Error message has the value's location and path",
+                         "50:12: /malformed: not a valid integer: ""banana""",
+                         Try'Access);
+      end;
+
+      declare
+         procedure Try is
+            Unused : constant Boolean := Map.Boolean_Value ("malformed", True);
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Message ("Data_Error message (default form) has the path",
+                         "50:12: /malformed: not a valid boolean: ""banana""",
+                         Try'Access);
+      end;
+
+      declare
+         procedure Try is
+            Unused : constant Integer := Map.Integer_Value ("not_scalar");
+            pragma Unreferenced (Unused);
+         begin
+            null;
+         end Try;
+      begin
+         Expect_Message ("Data_Error message for a non-scalar has its key's location",
+                         "46:1: /not_scalar: key ""not_scalar"" is not a scalar value",
+                         Try'Access);
+      end;
    end;
+
+   -----------------------------------------------------------------
+   --  A node built in memory has no location, so its message has
+   --  only the path.
+   -----------------------------------------------------------------
+   declare
+      D : Doc.Document := Doc.Parse_String ("a: 1");
+      M : constant Nod.Node := Doc.Create_Mapping (D);
+      procedure Try is
+         Unused : constant Integer := M.Integer_Value ("n");
+         pragma Unreferenced (Unused);
+      begin
+         null;
+      end Try;
+   begin
+      M.Append_Pair (Doc.Create_Scalar (D, "n"), Doc.Create_Scalar (D, "lots"));
+      Doc.Set_Root (D, M);
+      Expect_Message ("Data_Error message on a built node has no location",
+                      "/n: not a valid integer: ""lots""", Try'Access);
+   end;
+
+   -----------------------------------------------------------------
+   --  Has_Location, In_File, Without_Location
+   -----------------------------------------------------------------
+   Check ("Has_Location (located message)",
+          Libfyaml.Has_Location ("5:42: /a: bad"));
+   Check ("not Has_Location (path only)",
+          not Libfyaml.Has_Location ("/a: bad"));
+   Check ("In_File with a location",
+          Libfyaml.In_File ("f.yaml", "5:42: /a: bad") = "f.yaml:5:42: /a: bad");
+   Check ("In_File without a location",
+          Libfyaml.In_File ("f.yaml", "/a: bad") = "f.yaml: /a: bad");
+   Check ("Without_Location drops LINE:COLUMN",
+          Libfyaml.Without_Location ("5:42: /a: bad") = "/a: bad");
+   Check ("Without_Location leaves a path-only message",
+          Libfyaml.Without_Location ("/a: bad") = "/a: bad");
 
    Ada.Text_IO.New_Line;
    if Failures = 0 then

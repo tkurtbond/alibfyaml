@@ -5,12 +5,13 @@
 --  Unlike a syntax error (example_syntax_error.adb), there IS a
 --  parsed tree here -- the document parses fine; it's a specific
 --  Node's content that's the wrong shape. Libfyaml.Data_Error's own
---  message (from the typed accessor, e.g. Integer_Value) carries only
---  the offending text, no location -- this is exactly the motivating
---  case for Libfyaml.Nodes.Location (see 000-todo.org's "Add
---  source-location access" entry): look up the Node *before* calling
+--  message already starts with the bad value's line, column and path
+--  ("2:8: /count: not a valid integer: ..."), so Libfyaml.In_File
+--  alone gives gcc's format. This example does it the long way, to
+--  show Libfyaml.Nodes.Location: look up the Node *before* calling
 --  the typed accessor on it, so its Location is still in scope to
---  report alongside Data_Error's message if that call fails.
+--  report if that call fails, and drop the message's own location
+--  with Libfyaml.Without_Location so it isn't printed twice.
 --
 --  Shows the same malformed value parsed two ways -- from a file
 --  (Parse_File) and from an in-memory string (Parse_String) -- to
@@ -93,7 +94,8 @@ procedure Example_Value_Error is
       --  which is exactly why Count is looked up *before* the call
       --  that might fail, rather than only from inside the handler.
       when E : Libfyaml.Data_Error =>
-         Report (File_Label, Count, Ada.Exceptions.Exception_Message (E));
+         Report (File_Label, Count,
+                 Libfyaml.Without_Location (Ada.Exceptions.Exception_Message (E)));
          Saw_Error := True;
    end Check_Count;
 

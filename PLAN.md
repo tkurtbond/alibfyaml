@@ -1166,35 +1166,29 @@ additions to the existing `test/config.yaml`) covering:
 - ~~**Node/Document liveness enforcement is documentation-only.**~~
   Resolved: implemented. See the dedicated "Node/Document liveness
   enforcement" section below for the design actually built.
-- **`Missing_Key`/`Data_Error` carry only a bare message, not
-  `Path`/`Location`.** Confirmed by reading `libfyaml-nodes.adb`'s
-  actual `raise` statements: `Required` raises `Missing_Key with
-  "missing required key ""<Key>"""`, and every typed accessor's
-  `Data_Error` similarly carries just a `"not a valid <type>: ...""`
-  string -- neither exception carries the offending `Map`'s `Path` or
-  the scalar `Node`'s `Location`, even though the accessor raising it
-  already holds exactly the `Node`/`Map` needed to compute either.
-  Today a caller who wants that context fetches and combines it by
-  hand, exactly as `test/example_missing_field.adb` demonstrates
-  (`Path (Server)` alongside the caught `Missing_Key`'s own message).
-  A sibling binding to the same C library for a garbage-collected host
-  (`slibfyaml`, Chicken Scheme, `~/Repos/Scheme/Chicken/5/slibfyaml`)
-  decided to attach this automatically instead: its `missing-key`/
-  `data` conditions carry `'path` (and `'line`/`'column` when
-  available) as structured fields, populated by the same internal
-  helper every typed accessor already funnels through to raise, with
-  the message text folding the path in too (`"missing required key
-  \"host\" at /server"`) -- costing nothing extra at the raise site
-  since the node is already in hand. Ada exceptions don't carry
-  structured fields as directly as a CHICKEN condition object does
-  (an Ada equivalent would mean either widening `Message` at the raise
-  site to include `Path`/`Location` text inline, or defining dedicated
-  exception occurrence types/`Exception_Information` accessors for
-  `Missing_Key`/`Data_Error` -- the latter a real API-shape decision,
-  not just a formatting tweak). Deferred rather than decided: flagged
-  here as a possible future enhancement, not applied -- changing what
-  an already-shipped exception carries needs its own consideration,
-  not something to fold in incidentally alongside noting the idea.
+- ~~**`Missing_Key`/`Data_Error` carry only a bare message, not
+  `Path`/`Location`.**~~ Resolved 2026-11-06 by widening the message
+  at the raise site, the simpler of the two shapes considered.  Every
+  message is now `[LINE:COLUMN: ]PATH: TEXT`: a `Missing_Key` starts
+  with the mapping's `Path` (`/1/stats/0: missing required key
+  "points"`), and a `Data_Error` with the line and column of the bad
+  scalar and then its `Path` (`5:42: /1/stats/0/points: not a valid
+  integer: "banana"`).  For a value that isn't a scalar the line and
+  column are its key's (`46:1: /not_scalar: key "not_scalar" is not a
+  scalar value`), since only a scalar has a location.  This is what
+  olibfyaml reports, minus the file name the Ada message can't know;
+  `Libfyaml.In_File (File, Message)` puts it in front gcc-style
+  (`FILE:5:42: /1/...`), and `Libfyaml.Without_Location` drops the
+  line and column for a caller that reports its own.  The exceptions
+  and their names are unchanged; only the text grew.  A missing key
+  has no location, as in olibfyaml.  A mark of line 1, column 1 counts
+  as none, because a node built in memory carries exactly that (see
+  `Has_Location`): the only real fault there is a key or a single
+  scalar at the very start of the input, which loses its location but
+  never gets a false one.  `test_scalars` checks the messages and the
+  helpers.  Callers that matched the old bare text must be updated
+  (besm2_fmt's `test/cli.sh`; ova_fmt, which prints its own path and
+  location, drops the library's).
 - **Should `Parse_String`/`Parse_File` warn about extra documents?**
   Now that `Document_Stream` exists as the correct tool for
   multi-document input, should the single-document functions detect
