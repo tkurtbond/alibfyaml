@@ -154,9 +154,10 @@ In the Oberon bindings, `FyamlStreams` resolves unless given
 the end, so it ended the stream quietly, with no error. That is bug 1
 in `POLIBFYAML-BUGS.md` and `OLIBFYAML-BUGS.md`, fixed 2026-11-15 by
 also checking `fy_parser_get_stream_error`, which is set for a syntax
-error and a resolve failure alike, and not at a clean end. pobesm2_fmt2
-and obesm2_fmt2 read files that way, so until they are rebuilt with the
-fixed binding they print nothing for a file with an undefined alias and
-exit with status 0. The Ada binding's
+error and a resolve failure alike, and not at a clean end. pobesm2_fmt2,
+obesm2_fmt2 and obesm2_fmt read files that way, and printed nothing for
+a file with an undefined alias and exited with status 0; rebuilt with
+the fixed binding (2026-11-16), they report it and exit with status 1,
+and their tests check it. The Ada binding's
 `Libfyaml.Documents.Streams` makes the same check, but its parser never
 sets `FYPCF_RESOLVE_DOCUMENT`, so this can't happen there.
