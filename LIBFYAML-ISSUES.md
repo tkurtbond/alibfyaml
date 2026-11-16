@@ -79,3 +79,81 @@ In the bindings, this is emitting with `emitModeBlock` (Oberon) or
 changing.
 besm2_cg_web, its web port, writes and reads the same bytes, lost
 spaces included (its PLAN.md, "Findings").
+
+## 2. A failed resolve while streaming doesn't set `fy_diag_got_error`
+
+Found 2026-11-15, through pobesm2_fmt2 (polibfyaml) while porting
+besm2_cg_po to the web. Seen with libfyaml 0.8 (Fedora 44's
+libfyaml-devel 0.8-9.fc44). Not reported upstream, and not yet tried
+with libfyaml 1.0.0-rc2.
+
+When a parser created with `FYPCF_RESOLVE_DOCUMENT` loads a document
+with an alias that can't be resolved (an undefined alias, or a cyclic
+reference), `fy_parse_load_document` returns NULL and the diag
+collects the error, but `fy_diag_got_error` stays false. So a caller
+can't use it to tell this failure from the end of the stream, as it
+can for a syntax error. `fy_parser_get_stream_error` does return
+true. `fy_document_build_from_string` with the same input and config
+sets `fy_diag_got_error`, so the two paths disagree. Nothing is printed
+to standard error in this case.
+
+Repro, `alias.c`:
+
+```c
+/* libfyaml: a resolve failure in fy_parse_load_document collects an
+   error but leaves fy_diag_got_error false. */
+#include <stdio.h>
+#include <string.h>
+#include <libfyaml.h>
+
+int main(int argc, char **argv) {
+  struct fy_diag *diag = fy_diag_create(NULL);
+  fy_diag_set_collect_errors(diag, true);
+  struct fy_parse_cfg cfg;
+  memset(&cfg, 0, sizeof cfg);
+  cfg.flags = FYPCF_RESOLVE_DOCUMENT;
+  cfg.diag = diag;
+  struct fy_parser *p = fy_parser_create(&cfg);
+  fy_parser_set_string(p, argv[1], FY_NT);
+  struct fy_document *d = fy_parse_load_document(p);
+  printf("document: %s\nfy_diag_got_error: %d\nfy_parser_get_stream_error: %d\n",
+         d ? "non-NULL" : "NULL", fy_diag_got_error(diag),
+         fy_parser_get_stream_error(p));
+  void *it = NULL;
+  struct fy_diag_error *e;
+  while ((e = fy_diag_errors_iterate(diag, &it)))
+    printf("collected: %d:%d: %s\n", e->line, e->column, e->msg);
+  if (d) fy_document_destroy(d);
+  fy_parser_destroy(p);
+  fy_diag_destroy(diag);
+  return 0;
+}
+```
+
+```sh
+cc -o alias alias.c $(pkg-config --cflags --libs libfyaml)
+./alias '- name: *nope'
+./alias '- &a [*a]'
+```
+
+Output:
+
+```
+document: NULL
+fy_diag_got_error: 0
+fy_parser_get_stream_error: 1
+collected: 1:10: invalid alias
+document: NULL
+fy_diag_got_error: 0
+fy_parser_get_stream_error: 1
+collected: 1:8: cyclic reference detected
+```
+
+In the Oberon bindings, `FyamlStreams` resolves unless given
+`NoResolve`, and uses `fy_diag_got_error` alone to tell an error from
+the end, so it ends the stream quietly, with no error. That is bug 1
+in `POLIBFYAML-BUGS.md` and `OLIBFYAML-BUGS.md`. pobesm2_fmt2 and
+obesm2_fmt2 read files that way, so they print nothing for a file with
+an undefined alias and exit with status 0. The Ada binding's
+`Libfyaml.Documents.Streams` makes the same check, but its parser never
+sets `FYPCF_RESOLVE_DOCUMENT`, so this can't happen there.
