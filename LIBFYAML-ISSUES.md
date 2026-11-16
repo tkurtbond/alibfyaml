@@ -150,10 +150,13 @@ collected: 1:8: cyclic reference detected
 ```
 
 In the Oberon bindings, `FyamlStreams` resolves unless given
-`NoResolve`, and uses `fy_diag_got_error` alone to tell an error from
-the end, so it ends the stream quietly, with no error. That is bug 1
-in `POLIBFYAML-BUGS.md` and `OLIBFYAML-BUGS.md`. pobesm2_fmt2 and
-obesm2_fmt2 read files that way, so they print nothing for a file with
-an undefined alias and exit with status 0. The Ada binding's
+`NoResolve`, and used `fy_diag_got_error` alone to tell an error from
+the end, so it ended the stream quietly, with no error. That is bug 1
+in `POLIBFYAML-BUGS.md` and `OLIBFYAML-BUGS.md`, fixed 2026-11-15 by
+also checking `fy_parser_get_stream_error`, which is set for a syntax
+error and a resolve failure alike, and not at a clean end. pobesm2_fmt2
+and obesm2_fmt2 read files that way, so until they are rebuilt with the
+fixed binding they print nothing for a file with an undefined alias and
+exit with status 0. The Ada binding's
 `Libfyaml.Documents.Streams` makes the same check, but its parser never
 sets `FYPCF_RESOLVE_DOCUMENT`, so this can't happen there.
